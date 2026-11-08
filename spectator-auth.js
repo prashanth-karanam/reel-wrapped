@@ -602,28 +602,100 @@ async function applyLiveScanSuccess(data, statusEl) {
   }
 }
 
+window.toggleStartPasswordVisibility = function() {
+  const pwd = document.getElementById('start-password-input');
+  const icon = document.getElementById('start-pwd-eye-icon');
+  if (pwd) {
+    if (pwd.type === 'password') {
+      pwd.type = 'text';
+      if (icon) icon.innerText = '🙈';
+    } else {
+      pwd.type = 'password';
+      if (icon) icon.innerText = '👁️';
+    }
+  }
+};
+
+window.loginWithSavedSession = async function(username, sessionid) {
+  const statusEl = document.getElementById('start-login-status');
+  const btn = document.getElementById('btn-start-login');
+  if (statusEl) {
+    statusEl.classList.remove('hidden');
+    statusEl.innerHTML = `
+      <div class="flex items-center gap-2 text-amber-300 font-bold p-3 rounded-xl bg-slate-900 border border-slate-700 text-xs">
+        <span class="inline-block animate-spin text-sm">🔄</span>
+        <span>Logging in as @${username} &amp; counting real DM reels...</span>
+      </div>
+    `;
+  }
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/ig/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, sessionid })
+    });
+    const data = await res.json();
+    if (res.ok && data.status === 'ok') {
+      await applyLiveScanSuccess(data, statusEl);
+    } else {
+      if (statusEl) {
+        statusEl.innerHTML = `
+          <div class="p-3 rounded-xl bg-rose-950/80 border border-rose-500/40 text-rose-200 text-xs text-left space-y-1">
+            <div class="font-bold flex items-center gap-1.5 text-rose-300">
+              <span>⚠️</span>
+              <span>Saved session expired</span>
+            </div>
+            <p class="text-[11px] text-rose-200/80">Please enter your password below to refresh your session.</p>
+          </div>
+        `;
+      }
+      const uInput = document.getElementById('start-username-input');
+      if (uInput) uInput.value = username;
+      const pInput = document.getElementById('start-password-input');
+      if (pInput) pInput.focus();
+    }
+  } catch (err) {
+    if (statusEl) {
+      statusEl.innerHTML = `
+        <div class="p-3 rounded-xl bg-amber-950/80 border border-amber-500/40 text-amber-200 text-xs text-left">
+          ⚠️ Could not connect to backend server. Make sure localhost:3000 is running!
+        </div>
+      `;
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
 window.executeInstagramAuthHandshake = async function(sourcePrefix = 'vault') {
   const username = (document.getElementById(`${sourcePrefix}-username-input`)?.value || '').trim().replace(/^@/, '');
   const password = (document.getElementById(`${sourcePrefix}-password-input`)?.value || '');
   const sessionInput = (document.getElementById(`${sourcePrefix}-session-input`)?.value || '').trim();
   const statusEl = document.getElementById(`${sourcePrefix}-login-status`) || document.getElementById('live-login-status');
   const btn = document.getElementById(sourcePrefix === 'start' ? 'btn-start-login' : 'btn-init-scan');
+  const btnText = document.getElementById(sourcePrefix === 'start' ? 'btn-start-login-text' : 'init-scan-text');
 
   if (!username && !sessionInput) {
-    if (typeof showToast === 'function') showToast('⚠️ Enter your username & password OR paste your sessionid cookie');
+    if (typeof showToast === 'function') showToast('⚠️ Enter your Instagram username and password');
     return;
   }
 
+  const origBtnText = btnText ? btnText.innerText : '';
   if (btn) {
     btn.disabled = true;
-    btn.classList.add('opacity-80');
+    btn.classList.add('opacity-75');
+  }
+  if (btnText) {
+    btnText.innerText = '🔄 Logging in to Instagram...';
   }
   if (statusEl) {
     statusEl.classList.remove('hidden');
     statusEl.innerHTML = `
-      <div class="flex items-center gap-2 text-amber-300 font-bold">
+      <div class="flex items-center gap-2 text-amber-300 font-bold p-3 rounded-xl bg-slate-900 border border-slate-700 text-xs text-left">
         <span class="inline-block animate-spin text-sm">🔄</span>
-        <span>Connecting to direct_v2/inbox &amp; counting real DM reels...</span>
+        <span>Connecting securely to Instagram &amp; counting real DM reels...</span>
       </div>
     `;
   }
@@ -638,45 +710,58 @@ window.executeInstagramAuthHandshake = async function(sourcePrefix = 'vault') {
 
     if (data.status === 'two_factor_required') {
       pending2faState = data;
-      if (statusEl) statusEl.innerText = `🔐 2FA verification required for @${data.username}. Enter your 6-digit code.`;
+      if (statusEl) {
+        statusEl.innerHTML = `
+          <div class="p-3 rounded-xl bg-purple-950/80 border border-purple-500/40 text-purple-200 text-xs text-left space-y-1">
+            <div class="font-bold flex items-center gap-1.5 text-purple-300">
+              <span>📱</span>
+              <span>2FA verification required for @${data.username}</span>
+            </div>
+            <p class="text-[11px] text-purple-200/80">Enter the 6-digit code in the prompt window.</p>
+          </div>
+        `;
+      }
       document.getElementById('modal-ig-2fa')?.classList.remove('hidden');
+      document.getElementById('ig-2fa-code-input')?.focus();
       if (typeof showToast === 'function') showToast('📱 Enter your 6-digit Instagram 2FA code');
     } else if (res.ok && data.status === 'ok') {
       await applyLiveScanSuccess(data, statusEl);
     } else {
-      const errMsg = data.message || 'Instagram session verification required.';
+      const errMsg = data.message || 'Login failed. Please check your username and password.';
       if (statusEl) {
         statusEl.innerHTML = `
-          <div class="space-y-2 text-left p-3 rounded-xl bg-slate-900 border border-slate-700 text-slate-200">
-            <div class="font-bold text-amber-300 text-xs flex items-center gap-1.5">
-              <span>???</span>
+          <div class="p-3 rounded-xl bg-rose-950/90 border border-rose-500/40 text-rose-200 text-xs text-left space-y-1">
+            <div class="font-bold flex items-center gap-1.5 text-rose-300">
+              <span>❌</span>
               <span>${errMsg}</span>
             </div>
-            <div class="text-[11px] text-slate-300 space-y-1">
-              <p>Meta requires a browser session cookie for direct inbox access:</p>
-              <div class="bg-black/40 p-2 rounded-lg text-[10px] text-slate-300 space-y-0.5 font-mono">
-                <div>1. In another tab, open <span class="text-white">instagram.com</span></div>
-                <div>2. Press <kbd class="px-1 bg-slate-800 border border-slate-600 rounded text-emerald-400">F12</kbd> &rarr; <strong>Application</strong> &rarr; <strong>Cookies</strong> &rarr; copy <span class="text-emerald-300 font-bold">sessionid</span></div>
-                <div>3. Paste into the session box above &amp; click <strong>Login &amp; Scan</strong></div>
-              </div>
-            </div>
-            <div class="pt-1">
-              <button type="button" onclick="continueWithDemoProfile()" class="w-full py-2 rounded-xl brand-gradient-bg text-white font-bold text-xs shadow-sm hover:opacity-95 active:scale-95 transition-all">
-                ?? Or Continue in Demo Mode Right Now &rarr;
-              </button>
-            </div>
+            <p class="text-[11px] text-rose-200/80 leading-relaxed">
+              Please double-check your Instagram handle and password. If your account has multi-factor auth or device approval enabled, approve the notification on your phone and try again.
+            </p>
           </div>
         `;
       }
-      if (typeof showToast === 'function') showToast('?? Paste sessionid cookie or explore in Demo Mode');
+      if (typeof showToast === 'function') showToast(`❌ ${errMsg}`);
     }
   } catch (err) {
-    if (statusEl) statusEl.innerText = `⚠️ Running on static host. Paste a JSON export or run the 1-line Localhost command below!`;
-    if (typeof showToast === 'function') showToast('💡 Use Local JSON Import or run the 1-line Localhost launcher!');
+    if (statusEl) {
+      statusEl.innerHTML = `
+        <div class="p-3 rounded-xl bg-amber-950/80 border border-amber-500/40 text-amber-200 text-xs text-left space-y-1">
+          <div class="font-bold text-amber-300">⚡ Web Static Preview Detected</div>
+          <p class="text-[11px] text-amber-200/80">
+            Direct Instagram login requires a local backend. Run Reel Wrapped on your PC at <strong>http://localhost:3000</strong>, install the <strong>Android APK</strong>, or explore in <strong>Demo Mode</strong> right now!
+          </p>
+        </div>
+      `;
+    }
+    if (typeof showToast === 'function') showToast('💡 Launch localhost or try Demo Mode!');
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.classList.remove('opacity-80');
+      btn.classList.remove('opacity-75');
+    }
+    if (btnText && origBtnText) {
+      btnText.innerText = origBtnText;
     }
   }
 };
@@ -816,110 +901,131 @@ window.addEventListener('DOMContentLoaded', async () => {
   const winCmd = `irm https://raw.githubusercontent.com/prashanth-karanam/reel-wrapped/main/install.ps1 | iex`;
   const macCmd = `curl -fsSL https://raw.githubusercontent.com/prashanth-karanam/reel-wrapped/main/install.sh | bash`;
   const elecCmd = `git clone https://github.com/prashanth-karanam/reel-wrapped && cd reel-wrapped && npm i && npm run electron`;
+  const gitPushCmd = `mkdir -p reel-wrapped-clean && tar -xzf reel-wrapped-v2.4-clean.tar.gz -C reel-wrapped-clean && cd reel-wrapped-clean && git init -b main && git add -A && git commit -m "feat: Reel Wrapped v2.4 (Multi-User Login, In-App 9:16 Spectator, Rust/WASM, Localhost/Electron & APK)" && git remote add origin https://github.com/prashanth-karanam/reel-wrapped.git && git push -u origin main --force`;
 
   const modalsHtml = `
     <!-- START-OF-APP MULTI-USER LOGIN & LAUNCHER GATE -->
-    <div id="modal-start-auth-gate" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 overflow-y-auto">
-      <div class="w-full max-w-[430px] bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden my-auto">
+    <div id="modal-start-auth-gate" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div class="w-full max-w-[420px] bg-white rounded-3xl border border-slate-200 shadow-2xl overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-200">
         <!-- Gate Top Banner -->
         <div class="brand-gradient-bg p-5 text-white relative overflow-hidden">
           <div class="flex items-center justify-between relative z-10">
             <div class="flex items-center gap-2.5">
-              <div class="w-10 h-10 rounded-2xl bg-black/25 backdrop-blur-md flex items-center justify-center font-black text-lg border border-white/30">
+              <div class="w-10 h-10 rounded-2xl bg-black/25 backdrop-blur-md flex items-center justify-center font-black text-lg border border-white/30 shadow-inner">
                 🎬
               </div>
               <div>
                 <h2 class="text-base font-black tracking-tight leading-none">REEL WRAPPED '25</h2>
-                <span class="text-[10px] font-mono opacity-90">100% Local • Multi-User Vault • Rust/WASM</span>
+                <span class="text-[10px] font-mono opacity-90">100% Private • Direct to Instagram</span>
               </div>
             </div>
-            <button type="button" onclick="closeStartLoginGate()" class="px-2.5 py-1 rounded-full bg-black/25 hover:bg-black/40 text-[11px] font-bold">
-              Skip →
+            <button type="button" onclick="closeStartLoginGate()" class="px-3 py-1 rounded-full bg-black/25 hover:bg-black/40 text-xs font-bold transition-all">
+              ✕
             </button>
           </div>
         </div>
 
-        <div class="p-4 sm:p-5 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
-          <!-- Multi-User Account Switcher -->
+        <div class="p-4 sm:p-5 space-y-4 max-h-[82vh] overflow-y-auto custom-scrollbar">
+          <!-- Quick 1-Tap Saved Session Banner (Auto-populated if found on device) -->
+          <div id="start-saved-session-banner" class="hidden"></div>
+
+          <!-- PRIMARY INSTAGRAM LOGIN FORM -->
+          <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 shadow-sm space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="text-xs font-black text-slate-900 uppercase tracking-wide block">Log In with Instagram</span>
+                <span class="text-[10px] text-slate-500">Enter your credentials to scan your real DM reels</span>
+              </div>
+              <span class="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
+                🔒 100% On-Device
+              </span>
+            </div>
+
+            <div class="space-y-2">
+              <div>
+                <label class="text-[10px] font-bold text-slate-600 uppercase block mb-1">Username</label>
+                <input id="start-username-input" type="text" placeholder="Instagram username (e.g. yourhandle)" autocomplete="username" class="w-full px-3.5 py-2.5 text-xs font-mono bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-200 transition-all shadow-sm">
+              </div>
+
+              <div>
+                <label class="text-[10px] font-bold text-slate-600 uppercase block mb-1">Password</label>
+                <div class="relative flex items-center">
+                  <input id="start-password-input" type="password" placeholder="Instagram password" autocomplete="current-password" class="w-full px-3.5 py-2.5 pr-10 text-xs font-mono bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-purple-600 focus:ring-2 focus:ring-purple-200 transition-all shadow-sm">
+                  <button type="button" onclick="toggleStartPasswordVisibility()" class="absolute right-3 text-slate-400 hover:text-slate-600 transition-colors" title="Toggle password visibility">
+                    <span id="start-pwd-eye-icon">👁️</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div id="start-login-status" class="hidden"></div>
+
+            <button id="btn-start-login" type="button" onclick="executeInstagramAuthHandshake('start')" class="w-full py-3.5 rounded-xl brand-gradient-bg text-white font-black text-xs shadow-lg shadow-pink-500/25 hover:opacity-95 active:scale-95 transition-all flex items-center justify-center gap-2">
+              <span id="btn-start-login-text">🔐 LOG IN &amp; GENERATE WRAPPED →</span>
+            </button>
+
+            <!-- Instant Demo & File Import Row -->
+            <div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60">
+              <button type="button" onclick="continueWithDemoProfile()" class="py-2.5 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-[11px] border border-purple-200/80 transition-all">
+                🎮 Try Demo Mode
+              </button>
+              <button type="button" onclick="document.getElementById('local-json-file-input').click()" class="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] border border-slate-200 transition-all">
+                📂 Import JSON File
+              </button>
+            </div>
+          </div>
+
+          <!-- Multi-User Account Switcher (if any saved on this device) -->
           <div class="space-y-1.5">
             <div class="flex items-center justify-between">
-              <span class="text-[10px] font-black text-slate-500 uppercase tracking-wider">👥 Multi-User Account Switcher</span>
-              <button type="button" onclick="continueWithDemoProfile()" class="text-[10px] font-black text-purple-600 hover:underline">
-                ⚡ Load Demo Vault
-              </button>
+              <span class="text-[10px] font-black text-slate-500 uppercase tracking-wider">👥 Saved Accounts on Device</span>
             </div>
             <div id="start-gate-accounts-list" class="space-y-1.5"></div>
           </div>
 
-          <!-- Add / Login Instagram Account -->
-          <div class="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-black text-slate-900">🔐 Sign In / Add Instagram Account</span>
-              <span class="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">Read-Only Local</span>
-            </div>
-
-            <input id="start-username-input" type="text" placeholder="Instagram Username (e.g. yourhandle)" class="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-purple-500">
-            <input id="start-password-input" type="password" placeholder="Instagram Password (or use sessionid below)" class="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-200 rounded-xl text-slate-900 focus:outline-none focus:border-purple-500">
-
-            <div class="bg-emerald-50 rounded-xl border border-emerald-300 p-2.5 space-y-1">
-              <div class="flex items-center justify-between">
-                <span class="text-[10px] font-black text-emerald-900">🔑 Instant Cloud Bypass: Paste ` + '`sessionid`' + ` Cookie</span>
-                <span class="text-[9px] font-mono text-emerald-700 font-bold">Recommended</span>
+          <!-- ADVANCED & DEVELOPER COLLAPSED ACCORDION (OPTIONAL) -->
+          <details class="group rounded-2xl border border-slate-200 bg-slate-50/80 overflow-hidden text-xs">
+            <summary class="p-3 font-bold text-slate-600 cursor-pointer select-none flex items-center justify-between hover:text-slate-900 transition-colors">
+              <span class="flex items-center gap-1.5 text-[11px]">
+                <span>⚙️</span>
+                <span>Advanced &amp; Troubleshooting Options</span>
+              </span>
+              <span class="text-slate-400 group-open:rotate-180 transition-transform text-[10px]">▼</span>
+            </summary>
+            <div class="p-3.5 pt-0 space-y-3 border-t border-slate-200/60 mt-1">
+              <!-- Optional Cookie Paste -->
+              <div class="space-y-1 pt-2">
+                <label class="text-[10px] font-bold text-slate-600 uppercase block">Optional: Session Cookie Bypass</label>
+                <input id="start-session-input" type="text" placeholder="Paste sessionid cookie value (optional)" class="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-purple-600 shadow-sm">
+                <p class="text-[9px] text-slate-500">Only needed if Instagram blocks browser logins on your IP.</p>
               </div>
-              <input id="start-session-input" type="text" placeholder="Paste sessionid from instagram.com Cookies" class="w-full px-2.5 py-1.5 text-[11px] font-mono bg-white border border-emerald-300 rounded-lg text-slate-900 focus:outline-none focus:border-emerald-600">
-            </div>
 
-            <div id="start-login-status" class="hidden p-2.5 rounded-xl text-[11px] font-mono bg-slate-900 text-emerald-300 border border-slate-800"></div>
-
-            <button id="btn-start-login" type="button" onclick="executeInstagramAuthHandshake('start')" class="w-full py-3 rounded-xl brand-gradient-bg text-white font-black text-xs shadow-md hover:opacity-95 active:scale-95 transition-all">
-              🔐 LOGIN &amp; COUNT MY REAL DMs →
-            </button>
-
-            <div class="grid grid-cols-2 gap-2 pt-1">
-              <button type="button" onclick="document.getElementById('local-json-file-input').click()" class="py-2 px-3 rounded-xl bg-slate-900 text-white font-bold text-[11px] hover:bg-slate-800">
-                📂 Import message_1.json
-              </button>
-              <button type="button" onclick="continueWithDemoProfile()" class="py-2 px-3 rounded-xl bg-white border border-slate-300 text-slate-700 font-bold text-[11px] hover:bg-slate-100">
-                🎮 Preview Demo Mode
-              </button>
-            </div>
-          </div>
-
-          <!-- Single-Line Localhost, Electron App & Android APK Launchers -->
-          <div class="p-3.5 rounded-2xl bg-slate-900 text-white space-y-2.5">
-            <div class="flex items-center justify-between">
-              <span class="text-[10px] font-black uppercase tracking-wider text-amber-300">⚡ 1-Line Localhost, Electron &amp; APK</span>
-              <a href="https://github.com/prashanth-karanam/reel-wrapped/releases" target="_blank" rel="noopener noreferrer" class="text-[10px] font-mono font-bold text-emerald-400 hover:underline">
-                📲 Download APK ↗
-              </a>
-            </div>
-
-            <div class="space-y-1.5 text-[10px] font-mono">
-              <div class="flex items-center justify-between bg-black/40 p-2 rounded-xl border border-white/10 gap-2">
-                <div class="truncate">
-                  <span class="text-pink-400 block font-sans font-bold text-[9px]">Windows PowerShell (1-Line Localhost):</span>
-                  <code class="text-emerald-300">${winCmd}</code>
+              <!-- Terminal Launchers -->
+              <div class="space-y-1.5 pt-2 border-t border-slate-200/60">
+                <span class="text-[10px] font-bold text-slate-600 uppercase block">Run Locally via Terminal</span>
+                <div class="space-y-1 font-mono text-[9px]">
+                  <div class="flex items-center justify-between bg-slate-900 text-white p-2 rounded-xl gap-2">
+                    <span class="truncate text-emerald-300">Windows: ${winCmd}</span>
+                    <button type="button" onclick="copyOneLinerCommand('${winCmd}', 'Windows')" class="px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 text-white font-sans font-bold">Copy</button>
+                  </div>
+                  <div class="flex items-center justify-between bg-slate-900 text-white p-2 rounded-xl gap-2">
+                    <span class="truncate text-emerald-300">macOS/Linux: ${macCmd}</span>
+                    <button type="button" onclick="copyOneLinerCommand('${macCmd}', 'macOS')" class="px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 text-white font-sans font-bold">Copy</button>
+                  </div>
                 </div>
-                <button type="button" onclick="copyOneLinerCommand('${winCmd}', 'Windows PowerShell')" class="px-2 py-1 rounded bg-white/15 hover:bg-white/25 text-white font-sans font-bold shrink-0">Copy</button>
               </div>
 
-              <div class="flex items-center justify-between bg-black/40 p-2 rounded-xl border border-white/10 gap-2">
-                <div class="truncate">
-                  <span class="text-purple-300 block font-sans font-bold text-[9px]">macOS / Linux (1-Line Localhost):</span>
-                  <code class="text-emerald-300">${macCmd}</code>
-                </div>
-                <button type="button" onclick="copyOneLinerCommand('${macCmd}', 'macOS/Linux')" class="px-2 py-1 rounded bg-white/15 hover:bg-white/25 text-white font-sans font-bold shrink-0">Copy</button>
-              </div>
-
-              <div class="flex items-center justify-between bg-black/40 p-2 rounded-xl border border-white/10 gap-2">
-                <div class="truncate">
-                  <span class="text-amber-300 block font-sans font-bold text-[9px]">Electron Desktop App (1-Line Launch):</span>
-                  <code class="text-emerald-300">${elecCmd}</code>
-                </div>
-                <button type="button" onclick="copyOneLinerCommand('${elecCmd}', 'Electron Desktop')" class="px-2 py-1 rounded bg-white/15 hover:bg-white/25 text-white font-sans font-bold shrink-0">Copy</button>
+              <!-- Clean Repo Download & Releases -->
+              <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
+                <a href="/api/download-clean-repo" download="reel-wrapped-v2.4-clean.tar.gz" class="text-purple-600 font-bold hover:underline">
+                  📦 Download Clean Repo (.tar.gz)
+                </a>
+                <a href="https://github.com/prashanth-karanam/reel-wrapped/releases" target="_blank" rel="noopener noreferrer" class="text-emerald-600 font-bold hover:underline">
+                  📲 Download Android APK ↗
+                </a>
               </div>
             </div>
-          </div>
+          </details>
         </div>
       </div>
     </div>
@@ -1003,4 +1109,36 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (activeFriend) window.renderGhostRadar(activeFriend);
   if (typeof window.filterFriendsList === 'function') window.filterFriendsList();
   window.triggerGlobalCountRollup(650);
+
+  // Check if server has an active saved session on device (e.g. from local toolkit)
+  try {
+    const savedRes = await fetch('/api/ig/saved-session');
+    if (savedRes.ok) {
+      const savedData = await savedRes.json();
+      if (savedData && savedData.exists && savedData.username && savedData.sessionid) {
+        const banner = document.getElementById('start-saved-session-banner');
+        if (banner) {
+          banner.classList.remove('hidden');
+          banner.innerHTML = `
+            <div class="p-3 rounded-2xl bg-gradient-to-r from-purple-50 via-pink-50 to-amber-50 border-2 border-purple-300 flex items-center justify-between gap-2.5 shadow-sm">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-8 h-8 rounded-full brand-gradient-bg text-white font-black text-xs flex items-center justify-center shrink-0">
+                  ${savedData.username.slice(0, 2).toUpperCase()}
+                </div>
+                <div class="min-w-0">
+                  <div class="text-[9px] font-black text-purple-700 uppercase tracking-wider">Device Session Found</div>
+                  <div class="text-xs font-black text-slate-900 truncate">@${savedData.username}</div>
+                </div>
+              </div>
+              <button type="button" onclick="loginWithSavedSession('${savedData.username}', '${savedData.sessionid}')" class="px-3 py-1.5 rounded-xl brand-gradient-bg text-white font-black text-[11px] shadow-sm hover:opacity-90 active:scale-95 transition-all shrink-0">
+                1-Tap Login →
+              </button>
+            </div>
+          `;
+        }
+        const uInput = document.getElementById('start-username-input');
+        if (uInput && !uInput.value) uInput.value = savedData.username;
+      }
+    }
+  } catch (_) {}
 });

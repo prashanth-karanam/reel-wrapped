@@ -5,6 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import https from 'https';
 import crypto from 'crypto';
+import tweetsodium from 'tweetsodium';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 
@@ -499,6 +500,18 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
     const vaultDir = path.join(os.homedir(), '.ig_toolkit');
     fs.mkdirSync(vaultDir, { recursive: true });
     fs.writeFileSync(path.join(vaultDir, 'reel_wrapped_local_vault.json'), JSON.stringify(friends, null, 2));
+
+    if (cookies.sessionid) {
+      const sessionPayload = JSON.stringify({
+        username: realViewerUsername,
+        authorization_data: { sessionid: cookies.sessionid, ds_user_id: viewerPk },
+        cookies,
+        saved_at: new Date().toISOString()
+      }, null, 2);
+      fs.writeFileSync(path.join(vaultDir, 'session.json'), sessionPayload);
+      fs.writeFileSync(path.join(vaultDir, 'user.txt'), realViewerUsername);
+      fs.writeFileSync(path.join(__dirname, 'session.json'), sessionPayload);
+    }
   } catch {}
 
   return {
@@ -578,12 +591,122 @@ app.get('/api/ig/saved-session', (_req, res) => {
   return res.json({ exists: false });
 });
 
+
+async function igLoginGetPage(): Promise<{
+  cookies: Record<string, string>;
+  csrfToken: string;
+  keyId: string;
+  pubKeyHex: string;
+}> {
+  const res = await rawHttpsRequest('https://www.instagram.com/accounts/login/', 'GET', {
+    'User-Agent': IG_WEB_UA,
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+  });
+  const cookies = extractCookies(res.headers);
+  const csrfMatch = res.body.match(/csrf_token["']\s*:\s*["']([^"']+)/);
+  const keyIdMatch = res.body.match(/"key_id":\s*"?(\d+)"?/);
+  const pubKeyMatch = res.body.match(/"public_key":\s*"([0-9a-fA-F]+)"/);
+
+  const csrfToken = (csrfMatch && csrfMatch[1]) || cookies['csrftoken'] || '';
+  if (csrfToken) cookies['csrftoken'] = csrfToken;
+  const keyId = (keyIdMatch && keyIdMatch[1]) || '241';
+  const pubKeyHex = (pubKeyMatch && pubKeyMatch[1]) || '';
+
+  return { cookies, csrfToken, keyId, pubKeyHex };
+}
+
+function encryptInstagramPassword(keyId: string, pubKeyHex: string, password: string): string {
+  const ts = Math.floor(Date.now() / 1000);
+  try {
+    if (pubKeyHex && pubKeyHex.length === 64) {
+      const tsStr = String(ts);
+      const aesKey = crypto.randomBytes(32);
+      const iv = Buffer.alloc(12, 0);
+
+      const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
+      cipher.setAAD(Buffer.from(tsStr, 'utf8'));
+      const encPass = Buffer.concat([cipher.update(password, 'utf8'), cipher.final()]);
+      const tag = cipher.getAuthTag();
+
+      const encKey = (tweetsodium as any).seal(aesKey, Buffer.from(pubKeyHex, 'hex'));
+      const lenBuf = Buffer.alloc(2);
+      lenBuf.writeInt16LE(encKey.length, 0);
+
+      const payload = Buffer.concat([
+        Buffer.from([1, parseInt(keyId || '241', 10)]),
+        lenBuf,
+        Buffer.from(encKey),
+        Buffer.from(tag),
+        Buffer.from(encPass),
+      ]);
+      return `#PWD_INSTAGRAM_BROWSER:10:${ts}:${payload.toString('base64')}`;
+    }
+  } catch (e) {
+    console.warn('Password encryption fallback:', e);
+  }
+  return `#PWD_INSTAGRAM_BROWSER:0:${ts}:${password}`;
+}
+
+async function igLoginPost(
+  cleanUsername: string,
+  encPassword: string,
+  cookies: Record<string, string>,
+  csrfToken: string
+) {
+  const webBody = new URLSearchParams({
+    enc_password: encPassword,
+    username: cleanUsername,
+    queryParams: '{}',
+    optIntoOneTap: 'false',
+    trustedDeviceRecords: '{}',
+  }).toString();
+
+  const res = await rawHttpsRequest(
+    'https://www.instagram.com/api/v1/web/accounts/login/ajax/',
+    'POST',
+    {
+      'User-Agent': IG_WEB_UA,
+      Accept: '*/*',
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-CSRFToken': csrfToken,
+      'X-Instagram-AJAX': '1018314112',
+      'X-IG-App-ID': IG_WEB_APP_ID,
+      'X-ASBD-ID': '129477',
+      Referer: 'https://www.instagram.com/accounts/login/',
+      Origin: 'https://www.instagram.com',
+      'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+      'Sec-Ch-Ua-Mobile': '?0',
+      'Sec-Ch-Ua-Platform': '"Windows"',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin',
+      Cookie: formatCookieHeader(cookies),
+    },
+    webBody
+  );
+  const updatedCookies = extractCookies(res.headers, cookies);
+  let json: any = {};
+  try {
+    json = JSON.parse(res.body || '{}');
+  } catch {}
+  return { status: res.status, json, cookies: updatedCookies };
+}
+
 app.post('/api/ig/login', async (req, res) => {
   try {
     const { username = '', password = '', sessionid = '' } = req.body || {};
     const cleanUsername = String(username || '').trim().replace(/^@/, '');
 
-    // 1. Direct sessionid cookie or session.json provided -> 100% REAL LIVE DMs
+    // 1. Direct sessionid cookie or session.json provided
     if (sessionid && sessionid.trim()) {
       let cookies: Record<string, string> = {};
       const trimmed = sessionid.trim();
@@ -598,7 +721,6 @@ app.post('/api/ig/login', async (req, res) => {
           cookies.sessionid = decodeURIComponent(parsed.sessionid);
         }
       } else {
-        // Handle full cookie string or bare sessionid value
         if (trimmed.includes('sessionid=')) {
           for (const part of trimmed.split(';')) {
             const [k, ...vParts] = part.trim().split('=');
@@ -616,11 +738,68 @@ app.post('/api/ig/login', async (req, res) => {
     if (!cleanUsername || !password) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Enter your Instagram username & password, or paste your sessionid cookie below.',
+        message: 'Please enter your Instagram username and password.',
       });
     }
 
-    // 2. Attempt Python Android App login first (bypasses Web AntiScripting blocks)
+    // 2. Direct Web Login with genuine browser encryption & headers
+    try {
+      const { cookies: initCookies, csrfToken, keyId, pubKeyHex } = await igLoginGetPage();
+      const encPassword = encryptInstagramPassword(keyId, pubKeyHex, password);
+      const loginRes = await igLoginPost(cleanUsername, encPassword, initCookies, csrfToken);
+
+      if (loginRes.json.two_factor_required && loginRes.json.two_factor_info) {
+        return res.json({
+          status: 'two_factor_required',
+          username: cleanUsername,
+          two_factor_identifier: loginRes.json.two_factor_info.two_factor_identifier,
+          phone: loginRes.json.two_factor_info.obfuscated_phone_number || '',
+          cookies: loginRes.cookies,
+        });
+      }
+
+      if (loginRes.json.authenticated && loginRes.cookies['sessionid']) {
+        const scanResult = await scanLiveInstagramInbox(loginRes.cookies, cleanUsername);
+        return res.json({ status: 'ok', authMethod: 'direct_web_login', ...scanResult });
+      }
+
+      // Check specific Instagram responses
+      if (
+        loginRes.json.error_type === 'UserInvalidCredentials' ||
+        loginRes.json.exception_name === 'UserInvalidCredentials' ||
+        (!loginRes.json.authenticated && loginRes.json.user === true)
+      ) {
+        return res.status(401).json({
+          status: 'fail',
+          message: `Incorrect password for @${cleanUsername}. Please double-check your password and try again.`,
+        });
+      }
+
+      if (loginRes.json.user === false) {
+        return res.status(404).json({
+          status: 'fail',
+          message: `Instagram account @${cleanUsername} was not found. Please verify username spelling.`,
+        });
+      }
+
+      if (loginRes.json.checkpoint_url || loginRes.json.message === 'checkpoint_required') {
+        return res.status(403).json({
+          status: 'fail',
+          message: `Instagram security check triggered. Open instagram.com or your Instagram app to approve login, then try again.`,
+        });
+      }
+
+      if (loginRes.json.message && typeof loginRes.json.message === 'string' && loginRes.json.message.trim()) {
+        return res.status(400).json({
+          status: 'fail',
+          message: loginRes.json.message,
+        });
+      }
+    } catch (webErr: any) {
+      console.warn('Web login attempt error:', webErr?.message || webErr);
+    }
+
+    // 3. Fallback to Python Android App login
     try {
       const pyRes = await loginViaPythonInstagrapi(cleanUsername, password);
       if (pyRes && pyRes.status === 'ok' && pyRes.sessionid) {
@@ -636,63 +815,17 @@ app.post('/api/ig/login', async (req, res) => {
           two_factor_identifier: 'py_2fa',
           cookies: {},
         });
+      } else if (pyRes && pyRes.message) {
+        return res.status(401).json({
+          status: 'fail',
+          message: pyRes.message,
+        });
       }
     } catch {}
 
-    // 3. Fallback Web AJAX Login attempt
-    const loginPageRes = await rawHttpsRequest('https://www.instagram.com/accounts/login/', 'GET', {
-      'User-Agent': IG_WEB_UA,
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    });
-    let cookies = extractCookies(loginPageRes.headers);
-    const csrfMatch = loginPageRes.body.match(/csrf_token["']\s*:\s*["']([^"']+)/);
-    const csrfToken = (csrfMatch && csrfMatch[1]) || cookies['csrftoken'] || '';
-    if (csrfToken) cookies['csrftoken'] = csrfToken;
-
-    const ts = Math.floor(Date.now() / 1000).toString();
-    const webBody = new URLSearchParams({
-      enc_password: `#PWD_INSTAGRAM_BROWSER:0:${ts}:${password}`,
-      username: cleanUsername,
-      queryParams: '{}',
-      optIntoOneTap: 'false',
-      trustedDeviceRecords: '{}',
-    }).toString();
-
-    const webLoginRes = await igWebRequest(
-      'https://www.instagram.com/api/v1/web/accounts/login/ajax/',
-      'POST',
-      {
-        Cookie: formatCookieHeader(cookies),
-        'X-CSRFToken': csrfToken,
-      },
-      webBody
-    );
-    cookies = extractCookies(webLoginRes.headers, cookies);
-    let webJson: any = {};
-    try {
-      webJson = JSON.parse(webLoginRes.body || '{}');
-    } catch {}
-
-    if (webJson.two_factor_required && webJson.two_factor_info) {
-      return res.json({
-        status: 'two_factor_required',
-        username: cleanUsername,
-        two_factor_identifier: webJson.two_factor_info.two_factor_identifier,
-        cookies,
-      });
-    }
-
-    if (webJson.authenticated && cookies['sessionid']) {
-      const scanResult = await scanLiveInstagramInbox(cookies, cleanUsername);
-      return res.json({ status: 'ok', authMethod: 'password', ...scanResult });
-    }
-
-    // User-friendly sessionid challenge prompt
     return res.status(401).json({
-      status: 'checkpoint_required',
-      error_type: webJson.error_type || 'checkpoint_required',
-      message:
-        'Instagram requires session verification for this account. Please paste your browser sessionid cookie below to scan your live DMs immediately.',
+      status: 'fail',
+      message: `Unable to sign in as @${cleanUsername}. Please verify your credentials or check Instagram app notifications.`,
     });
   } catch (err: any) {
     return res.status(500).json({ status: 'fail', message: err.message || 'Login error' });
@@ -704,6 +837,7 @@ app.post('/api/ig/2fa', async (req, res) => {
     const { username, verification_code, two_factor_identifier, cookies = {} } = req.body || {};
     const cleanUsername = String(username || 'user').trim().replace(/^@/, '');
     const code = String(verification_code || '').trim();
+    const csrfToken = cookies['csrftoken'] || '';
 
     if (two_factor_identifier === 'py_2fa') {
       try {
@@ -717,7 +851,6 @@ app.post('/api/ig/2fa', async (req, res) => {
         }
       } catch {}
     }
-    const csrfToken = cookies['csrftoken'] || '';
 
     const web2faBody = new URLSearchParams({
       username: cleanUsername,
@@ -726,17 +859,34 @@ app.post('/api/ig/2fa', async (req, res) => {
       queryParams: '{}',
     }).toString();
 
-    const web2faRes = await igWebRequest(
+    const web2faRes = await rawHttpsRequest(
       'https://www.instagram.com/api/v1/web/accounts/login/ajax/two_factor/',
       'POST',
       {
-        Cookie: formatCookieHeader(cookies),
+        'User-Agent': IG_WEB_UA,
+        Accept: '*/*',
+        'X-Requested-With': 'XMLHttpRequest',
         'X-CSRFToken': csrfToken,
+        'X-Instagram-AJAX': '1018314112',
+        'X-IG-App-ID': IG_WEB_APP_ID,
+        'X-ASBD-ID': '129477',
+        Referer: 'https://www.instagram.com/accounts/login/',
+        Origin: 'https://www.instagram.com',
+        'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        Cookie: formatCookieHeader(cookies),
       },
       web2faBody
     );
     const updatedCookies = extractCookies(web2faRes.headers, cookies);
-    const web2faJson = JSON.parse(web2faRes.body || '{}');
+    let web2faJson: any = {};
+    try {
+      web2faJson = JSON.parse(web2faRes.body || '{}');
+    } catch {}
 
     if (web2faJson.authenticated && updatedCookies['sessionid']) {
       const scanResult = await scanLiveInstagramInbox(updatedCookies, cleanUsername);
@@ -745,7 +895,7 @@ app.post('/api/ig/2fa', async (req, res) => {
 
     return res.status(401).json({
       status: 'fail',
-      message: web2faJson.message || '2FA verification failed. Try pasting your sessionid cookie instead.',
+      message: web2faJson.message || '? Invalid 2FA verification code. Please try again.',
     });
   } catch (err: any) {
     return res.status(500).json({ status: 'fail', message: err.message || '2FA verification failed' });
