@@ -669,6 +669,62 @@ window.loginWithSavedSession = async function(username, sessionid) {
   }
 };
 
+window.launchChromeInteractiveLogin = async function() {
+  const btn = document.getElementById('btn-chrome-popup-login');
+  const btnText = document.getElementById('btn-chrome-popup-text');
+  const statusEl = document.getElementById('start-login-status');
+
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('opacity-75');
+  }
+  if (btnText) btnText.innerText = '🌐 Chrome Window Active... Please log in';
+  if (statusEl) {
+    statusEl.classList.remove('hidden');
+    statusEl.innerHTML = `
+      <div class="p-3.5 rounded-2xl bg-indigo-950/90 border border-indigo-400/50 text-indigo-100 text-xs text-left space-y-1.5 shadow-lg">
+        <div class="font-bold flex items-center gap-2 text-indigo-300">
+          <span class="inline-block animate-spin text-sm">🔄</span>
+          <span>Chrome Instagram Window Active</span>
+        </div>
+        <p class="text-[11px] text-indigo-200/90 leading-relaxed">
+          Log into Instagram in the popup window. When complete, this app will automatically detect your session, close the popup, and generate your Wrapped!
+        </p>
+      </div>
+    `;
+  }
+
+  try {
+    const res = await fetch('/api/ig/chrome-login', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok && data.status === 'ok') {
+      await applyLiveScanSuccess(data, statusEl);
+    } else {
+      if (statusEl) {
+        statusEl.innerHTML = `
+          <div class="p-3 rounded-xl bg-rose-950/90 border border-rose-500/50 text-rose-200 text-xs text-left">
+            ⚠️ ${data.message || 'Browser login cancelled or closed.'}
+          </div>
+        `;
+      }
+    }
+  } catch (err) {
+    if (statusEl) {
+      statusEl.innerHTML = `
+        <div class="p-3 rounded-xl bg-amber-950/90 border border-amber-500/50 text-amber-200 text-xs text-left">
+          ⚠️ Could not launch Chrome popup. Make sure localhost:3000 is running on your PC.
+        </div>
+      `;
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('opacity-75');
+    }
+    if (btnText) btnText.innerText = '🌐 1-CLICK LOGIN VIA CHROME POPUP (FASTEST)';
+  }
+};
+
 window.executeInstagramAuthHandshake = async function(sourcePrefix = 'vault') {
   const username = (document.getElementById(`${sourcePrefix}-username-input`)?.value || '').trim().replace(/^@/, '');
   const password = (document.getElementById(`${sourcePrefix}-password-input`)?.value || '');
@@ -726,6 +782,25 @@ window.executeInstagramAuthHandshake = async function(sourcePrefix = 'vault') {
       if (typeof showToast === 'function') showToast('📱 Enter your 6-digit Instagram 2FA code');
     } else if (res.ok && data.status === 'ok') {
       await applyLiveScanSuccess(data, statusEl);
+    } else if (data.code === 'RATE_LIMIT') {
+      if (statusEl) {
+        statusEl.innerHTML = `
+          <div class="p-3.5 rounded-2xl bg-amber-950/90 border-2 border-amber-400/70 text-amber-100 text-xs text-left space-y-2 shadow-lg">
+            <div class="font-bold text-amber-300 flex items-center gap-1.5">
+              <span>⚡</span>
+              <span>Instagram Edge Cooldown Active</span>
+            </div>
+            <p class="text-[11px] text-amber-200/90 leading-relaxed">
+              Instagram temporarily limited direct API password attempts from this network. Tap below to log in safely via the 1-Click Chrome window:
+            </p>
+            <button type="button" onclick="launchChromeInteractiveLogin()" class="w-full py-2.5 px-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs shadow transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+              <span>🌐</span>
+              <span>Open Chrome Window &amp; Sign In →</span>
+            </button>
+          </div>
+        `;
+      }
+      if (typeof showToast === 'function') showToast('⚡ Use 1-Click Chrome window to sign in!');
     } else {
       const errMsg = data.message || 'Login failed. Please check your username and password.';
       if (statusEl) {
@@ -931,10 +1006,22 @@ window.addEventListener('DOMContentLoaded', async () => {
 
           <!-- PRIMARY INSTAGRAM LOGIN FORM -->
           <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 shadow-sm space-y-3">
+            <!-- 1-Click Chrome Window Login (Bypasses any IP rate limits) -->
+            <button id="btn-chrome-popup-login" type="button" onclick="launchChromeInteractiveLogin()" class="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-black text-xs shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer">
+              <span>🌐</span>
+              <span id="btn-chrome-popup-text">1-CLICK LOGIN VIA CHROME POPUP (FASTEST)</span>
+            </button>
+
+            <div class="flex items-center gap-2 my-1">
+              <div class="h-px bg-slate-200 flex-1"></div>
+              <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest">OR ENTER CREDENTIALS DIRECTLY</span>
+              <div class="h-px bg-slate-200 flex-1"></div>
+            </div>
+
             <div class="flex items-center justify-between">
               <div>
-                <span class="text-xs font-black text-slate-900 uppercase tracking-wide block">Log In with Instagram</span>
-                <span class="text-[10px] text-slate-500">Enter your credentials to scan your real DM reels</span>
+                <span class="text-xs font-black text-slate-900 uppercase tracking-wide block">Direct Login</span>
+                <span class="text-[10px] text-slate-500">Scan real DM reels using on-device TLS encryption</span>
               </div>
               <span class="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
                 🔒 100% On-Device

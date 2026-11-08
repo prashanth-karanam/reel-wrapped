@@ -6,6 +6,7 @@ import os from 'os';
 import https from 'https';
 import crypto from 'crypto';
 import tweetsodium from 'tweetsodium';
+import puppeteer from 'puppeteer-core';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 
@@ -21,10 +22,10 @@ try {
     let html = fs.readFileSync(indexHtmlPath, 'utf8');
     let modified = false;
     if (html.includes('<script src="/spectator-auth.js"></script>')) {
-      html = html.replace('<script src="/spectator-auth.js"></script>', '<script src="spectator-auth.js"></script>');
+      html = html.replace('<script src="/spectator-auth.js"></script>', '<script src="spectator-auth.js?v=2.5.0"></script>');
       modified = true;
     } else if (!html.includes('spectator-auth.js')) {
-      html = html.replace('</body>', '  <script src="spectator-auth.js"></script>\n</body>');
+      html = html.replace('</body>', '  <script src="spectator-auth.js?v=2.5.0"></script>\n</body>');
       modified = true;
     }
     if (html.includes('value="@prashanth.k"')) {
@@ -591,6 +592,159 @@ app.get('/api/ig/saved-session', (_req, res) => {
   return res.json({ exists: false });
 });
 
+function getLocalBrowserExecutable(): string | null {
+  const candidates = [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+let activeLoginBrowser: any = null;
+
+async function launchInteractiveBrowserLogin(): Promise<{
+  sessionid: string;
+  ds_user_id: string;
+  cookies: Record<string, string>;
+  username: string;
+}> {
+  const execPath = getLocalBrowserExecutable();
+  if (!execPath) {
+    throw new Error('Google Chrome or Microsoft Edge executable not found on this system.');
+  }
+
+  if (activeLoginBrowser) {
+    try {
+      await activeLoginBrowser.close();
+    } catch (_) {}
+    activeLoginBrowser = null;
+  }
+
+  const browser = await (puppeteer as any).launch({
+    executablePath: execPath,
+    headless: false,
+    defaultViewport: null,
+    args: [
+      '--app=https://www.instagram.com/accounts/login/',
+      '--window-size=480,720',
+      '--disable-blink-features=AutomationControlled',
+    ],
+  });
+  activeLoginBrowser = browser;
+
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+    const startTime = Date.now();
+    const timeoutMs = 180000; // 3 minutes timeout
+
+    const checkInterval = setInterval(async () => {
+      try {
+        if (Date.now() - startTime > timeoutMs) {
+          clearInterval(checkInterval);
+          if (!resolved) {
+            resolved = true;
+            try { await browser.close(); } catch (_) {}
+            activeLoginBrowser = null;
+            reject(new Error('Login timed out (3 minutes exceeded).'));
+          }
+          return;
+        }
+
+        const pages = await browser.pages();
+        if (pages.length === 0) {
+          clearInterval(checkInterval);
+          if (!resolved) {
+            resolved = true;
+            activeLoginBrowser = null;
+            reject(new Error('Login window was closed.'));
+          }
+          return;
+        }
+
+        const page = pages[0];
+        const cookies = await page.cookies();
+        const sessionCookie = cookies.find((c: any) => c.name === 'sessionid');
+        const dsUserCookie = cookies.find((c: any) => c.name === 'ds_user_id');
+
+        if (sessionCookie && sessionCookie.value) {
+          clearInterval(checkInterval);
+          if (!resolved) {
+            resolved = true;
+            const cookieMap: Record<string, string> = {};
+            for (const c of cookies) {
+              cookieMap[c.name] = c.value;
+            }
+
+            let detectedUsername = 'you';
+            try {
+              const currentUrl = page.url();
+              const urlMatch = currentUrl.match(/instagram\.com\/([a-zA-Z0-9._]+)\/?/);
+              if (urlMatch && !['accounts', 'explore', 'reels', 'direct', 'emails'].includes(urlMatch[1])) {
+                detectedUsername = urlMatch[1];
+              }
+            } catch (_) {}
+
+            setTimeout(async () => {
+              try { await browser.close(); } catch (_) {}
+              activeLoginBrowser = null;
+            }, 600);
+
+            resolve({
+              sessionid: sessionCookie.value,
+              ds_user_id: dsUserCookie ? dsUserCookie.value : '',
+              cookies: cookieMap,
+              username: detectedUsername,
+            });
+          }
+        }
+      } catch (err: any) {
+        if (err.message && err.message.includes('Target closed')) {
+          clearInterval(checkInterval);
+          if (!resolved) {
+            resolved = true;
+            activeLoginBrowser = null;
+            reject(new Error('Login window was closed.'));
+          }
+        }
+      }
+    }, 1000);
+
+    browser.on('disconnected', () => {
+      clearInterval(checkInterval);
+      if (!resolved) {
+        resolved = true;
+        activeLoginBrowser = null;
+        reject(new Error('Login window was closed.'));
+      }
+    });
+  });
+}
+
+app.post('/api/ig/chrome-login', async (_req, res) => {
+  try {
+    const creds = await launchInteractiveBrowserLogin();
+    const scanResult = await scanLiveInstagramInbox(creds.cookies, creds.username);
+    return res.json({
+      status: 'ok',
+      authMethod: 'chrome_popup',
+      ...scanResult,
+    });
+  } catch (err: any) {
+    return res.status(400).json({
+      status: 'fail',
+      message: err.message || 'Browser login failed or was cancelled.',
+    });
+  }
+});
+
 
 async function igLoginGetPage(): Promise<{
   cookies: Record<string, string>;
@@ -764,6 +918,19 @@ app.post('/api/ig/login', async (req, res) => {
       }
 
       // Check specific Instagram responses
+      if (
+        loginRes.status === 429 ||
+        loginRes.json.message === 'feedback_required' ||
+        loginRes.json.feedback_title === 'Try Again Later' ||
+        loginRes.json.spam === true
+      ) {
+        return res.status(429).json({
+          status: 'fail',
+          code: 'RATE_LIMIT',
+          message: 'Instagram has temporarily limited automated password checks on this network. Please click "🌐 1-Click Login via Chrome Popup" to sign in directly!',
+        });
+      }
+
       if (
         loginRes.json.error_type === 'UserInvalidCredentials' ||
         loginRes.json.exception_name === 'UserInvalidCredentials' ||
