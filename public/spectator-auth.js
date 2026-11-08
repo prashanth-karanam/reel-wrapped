@@ -644,20 +644,31 @@ window.executeInstagramAuthHandshake = async function(sourcePrefix = 'vault') {
     } else if (res.ok && data.status === 'ok') {
       await applyLiveScanSuccess(data, statusEl);
     } else {
-      const errMsg = data.message || 'Authentication rejected by Instagram.';
+      const errMsg = data.message || 'Instagram session verification required.';
       if (statusEl) {
         statusEl.innerHTML = `
-          <div class="space-y-1.5 text-amber-200 text-left">
-            <div class="font-black text-rose-400">⚠️ ${errMsg}</div>
-            <div class="text-[10px] text-slate-300 leading-relaxed">
-              <strong>To load 100% your real DMs on Cloud Preview (10s):</strong><br>
-              1. Open <code class="text-white">instagram.com</code> in another tab → Press <strong>F12</strong> → <strong>Application</strong> → <strong>Cookies</strong><br>
-              2. Copy the <strong>Value</strong> of <code class="text-emerald-300 font-bold">sessionid</code> and paste it in the green box above, OR run the 1-line Localhost launcher below on your PC!
+          <div class="space-y-2 text-left p-3 rounded-xl bg-slate-900 border border-slate-700 text-slate-200">
+            <div class="font-bold text-amber-300 text-xs flex items-center gap-1.5">
+              <span>???</span>
+              <span>${errMsg}</span>
+            </div>
+            <div class="text-[11px] text-slate-300 space-y-1">
+              <p>Meta requires a browser session cookie for direct inbox access:</p>
+              <div class="bg-black/40 p-2 rounded-lg text-[10px] text-slate-300 space-y-0.5 font-mono">
+                <div>1. In another tab, open <span class="text-white">instagram.com</span></div>
+                <div>2. Press <kbd class="px-1 bg-slate-800 border border-slate-600 rounded text-emerald-400">F12</kbd> &rarr; <strong>Application</strong> &rarr; <strong>Cookies</strong> &rarr; copy <span class="text-emerald-300 font-bold">sessionid</span></div>
+                <div>3. Paste into the session box above &amp; click <strong>Login &amp; Scan</strong></div>
+              </div>
+            </div>
+            <div class="pt-1">
+              <button type="button" onclick="continueWithDemoProfile()" class="w-full py-2 rounded-xl brand-gradient-bg text-white font-bold text-xs shadow-sm hover:opacity-95 active:scale-95 transition-all">
+                ?? Or Continue in Demo Mode Right Now &rarr;
+              </button>
             </div>
           </div>
         `;
       }
-      if (typeof showToast === 'function') showToast('🔑 Paste your sessionid cookie or run the 1-line Localhost command!');
+      if (typeof showToast === 'function') showToast('?? Paste sessionid cookie or explore in Demo Mode');
     }
   } catch (err) {
     if (statusEl) statusEl.innerText = `⚠️ Running on static host. Paste a JSON export or run the 1-line Localhost command below!`;
