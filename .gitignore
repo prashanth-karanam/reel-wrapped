@@ -15,3 +15,8 @@ reel_wrapped_local_vault.json
 android/
 
 *.apk
+
+__pycache__/
+*.pyc
+ReelWrapped*.apk
+

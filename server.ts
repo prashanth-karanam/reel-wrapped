@@ -522,45 +522,26 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
 }
 
 
-async function loginViaPythonInstagrapi(username: string, password: string, verificationCode = ''): Promise<any> {
+async function runPythonScanBridge(args: string[]): Promise<any> {
   return new Promise((resolve) => {
-    const pyScript = `
-import sys, json
-try:
-    from instagrapi import Client
-    u = sys.argv[1]
-    p = sys.argv[2]
-    code = sys.argv[3] if len(sys.argv) > 3 else ''
-    cl = Client()
-    cl.request_timeout = 0
-    logged_in = cl.login(u, p, verification_code=code)
-    if logged_in:
-        settings = cl.get_settings()
-        auth = settings.get('authorization_data', {})
-        cookies = settings.get('cookies', {})
-        sid = auth.get('sessionid') or cookies.get('sessionid')
-        uid = auth.get('ds_user_id') or cookies.get('ds_user_id')
-        print(json.dumps({'status': 'ok', 'sessionid': sid, 'ds_user_id': uid, 'cookies': cookies}))
-    else:
-        print(json.dumps({'status': 'fail', 'message': 'Instagram login failed'}))
-except Exception as e:
-    err = str(e)
-    if 'two_factor' in err.lower() or '2fa' in err.lower() or 'checkpoint' in err.lower():
-        print(json.dumps({'status': 'two_factor_required', 'message': err}))
-    else:
-        print(json.dumps({'status': 'fail', 'message': err}))
-`;
-    const child = spawn('python', ['-c', pyScript, username, password, verificationCode]);
+    const scriptPath = path.join(__dirname, 'scan_bridge.py');
+    const child = spawn('python', [scriptPath, ...args], {
+      windowsHide: true,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+    });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
-    child.on('close', () => {
+    child.stdout.on('data', (d) => { stdout += d.toString('utf8'); });
+    child.stderr.on('data', (d) => { stderr += d.toString('utf8'); });
+    child.on('close', (code) => {
       try {
-        const parsed = JSON.parse(stdout.trim());
-        resolve(parsed);
+        const json = JSON.parse(stdout.trim());
+        resolve(json);
       } catch {
-        resolve({ status: 'fail', message: stderr || stdout || 'Login exception' });
+        resolve({
+          status: 'fail',
+          message: stderr || stdout || `scan_bridge process exited with code ${code}`,
+        });
       }
     });
     child.on('error', (err) => {
@@ -569,7 +550,26 @@ except Exception as e:
   });
 }
 
-app.get('/api/ig/saved-session', (_req, res) => {
+async function loginViaPythonInstagrapi(username: string, password: string, verificationCode = ''): Promise<any> {
+  const args = ['--action', verificationCode ? '2fa' : 'login', '--username', username];
+  if (password) args.push('--password', password);
+  if (verificationCode) args.push('--code', verificationCode);
+  return runPythonScanBridge(args);
+}
+
+app.get('/api/ig/saved-session', async (_req, res) => {
+  try {
+    const bridgeCheck = await runPythonScanBridge(['--action', 'check_session']);
+    if (bridgeCheck && bridgeCheck.status === 'ok' && bridgeCheck.exists) {
+      return res.json({
+        exists: true,
+        username: bridgeCheck.username,
+        user_id: bridgeCheck.user_id,
+        sessionid: 'active_local_session',
+      });
+    }
+  } catch {}
+
   const candidatePaths = [
     path.join(os.homedir(), '.ig_toolkit', 'session.json'),
     path.join(os.homedir(), '.ig_reel_counter', 'session.json'),
@@ -590,6 +590,19 @@ app.get('/api/ig/saved-session', (_req, res) => {
     }
   }
   return res.json({ exists: false });
+});
+
+app.post('/api/ig/saved-session-scan', async (_req, res) => {
+  try {
+    console.log('[ReelWrapped] Running saved session scan via Python bridge...');
+    const scanResult = await runPythonScanBridge(['--action', 'saved_session_scan', '--limit', '10', '--pages', '4']);
+    if (scanResult && scanResult.status === 'ok') {
+      return res.json(scanResult);
+    }
+    return res.status(400).json(scanResult || { status: 'fail', message: 'Could not load saved session.' });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'fail', message: err.message || 'Saved session scan failed.' });
+  }
 });
 
 function getLocalBrowserExecutable(): string | null {
@@ -860,8 +873,20 @@ app.post('/api/ig/login', async (req, res) => {
     const { username = '', password = '', sessionid = '' } = req.body || {};
     const cleanUsername = String(username || '').trim().replace(/^@/, '');
 
-    // 1. Direct sessionid cookie or session.json provided
-    if (sessionid && sessionid.trim()) {
+    // 1. Check if user requested saved session or if requested username matches cached user in ~/.ig_toolkit
+    const check = await runPythonScanBridge(['--action', 'check_session']);
+    const isCachedUser = check?.exists && (!cleanUsername || (check.username && cleanUsername.toLowerCase() === check.username.toLowerCase()));
+
+    if (isCachedUser || sessionid === 'active_local_session') {
+      console.log(`[ReelWrapped] Using verified local toolkit session for @${check.username}`);
+      const bridgeRes = await runPythonScanBridge(['--action', 'saved_session_scan', '--limit', '10', '--pages', '4']);
+      if (bridgeRes && bridgeRes.status === 'ok') {
+        return res.json(bridgeRes);
+      }
+    }
+
+    // 2. Direct sessionid or cookies provided explicitly
+    if (sessionid && sessionid.trim() && sessionid.trim() !== 'active_local_session') {
       let cookies: Record<string, string> = {};
       const trimmed = sessionid.trim();
       if (trimmed.startsWith('{')) {
@@ -889,183 +914,75 @@ app.post('/api/ig/login', async (req, res) => {
       return res.json({ status: 'ok', authMethod: 'sessionid', ...scanResult });
     }
 
-    if (!cleanUsername || !password) {
+    if (!cleanUsername) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Please enter your Instagram username and password.',
+        message: 'Please enter your Instagram username.',
       });
     }
 
-    // 2. Direct Web Login with genuine browser encryption & headers
-    try {
-      const { cookies: initCookies, csrfToken, keyId, pubKeyHex } = await igLoginGetPage();
-      const encPassword = encryptInstagramPassword(keyId, pubKeyHex, password);
-      const loginRes = await igLoginPost(cleanUsername, encPassword, initCookies, csrfToken);
+    // 3. Primary Authentication: Native Python Instagrapi Bridge
+    // This connects via Instagram's mobile API (identical to instagram-reel-counter)
+    // completely avoiding the web AJAX rate-limit and "user: false" anti-bot blocks!
+    console.log(`[ReelWrapped] Authenticating @${cleanUsername} via Python instagrapi bridge...`);
+    const bridgeRes = await runPythonScanBridge([
+      '--action', 'login',
+      '--username', cleanUsername,
+      '--password', password || '',
+      '--limit', '10',
+      '--pages', '4',
+    ]);
 
-      if (loginRes.json.two_factor_required && loginRes.json.two_factor_info) {
-        return res.json({
-          status: 'two_factor_required',
-          username: cleanUsername,
-          two_factor_identifier: loginRes.json.two_factor_info.two_factor_identifier,
-          phone: loginRes.json.two_factor_info.obfuscated_phone_number || '',
-          cookies: loginRes.cookies,
-        });
-      }
-
-      if (loginRes.json.authenticated && loginRes.cookies['sessionid']) {
-        const scanResult = await scanLiveInstagramInbox(loginRes.cookies, cleanUsername);
-        return res.json({ status: 'ok', authMethod: 'direct_web_login', ...scanResult });
-      }
-
-      // Check specific Instagram responses
-      if (
-        loginRes.status === 429 ||
-        loginRes.json.message === 'feedback_required' ||
-        loginRes.json.feedback_title === 'Try Again Later' ||
-        loginRes.json.spam === true
-      ) {
-        return res.status(429).json({
-          status: 'fail',
-          code: 'RATE_LIMIT',
-          message: 'Instagram has temporarily limited automated password checks on this network. Please click "🌐 1-Click Login via Chrome Popup" to sign in directly!',
-        });
-      }
-
-      if (
-        loginRes.json.error_type === 'UserInvalidCredentials' ||
-        loginRes.json.exception_name === 'UserInvalidCredentials' ||
-        (!loginRes.json.authenticated && loginRes.json.user === true)
-      ) {
-        return res.status(401).json({
-          status: 'fail',
-          message: `Incorrect password for @${cleanUsername}. Please double-check your password and try again.`,
-        });
-      }
-
-      if (loginRes.json.user === false) {
-        return res.status(404).json({
-          status: 'fail',
-          message: `Instagram account @${cleanUsername} was not found. Please verify username spelling.`,
-        });
-      }
-
-      if (loginRes.json.checkpoint_url || loginRes.json.message === 'checkpoint_required') {
-        return res.status(403).json({
-          status: 'fail',
-          message: `Instagram security check triggered. Open instagram.com or your Instagram app to approve login, then try again.`,
-        });
-      }
-
-      if (loginRes.json.message && typeof loginRes.json.message === 'string' && loginRes.json.message.trim()) {
-        return res.status(400).json({
-          status: 'fail',
-          message: loginRes.json.message,
-        });
-      }
-    } catch (webErr: any) {
-      console.warn('Web login attempt error:', webErr?.message || webErr);
+    if (bridgeRes && bridgeRes.status === 'ok') {
+      return res.json(bridgeRes);
     }
 
-    // 3. Fallback to Python Android App login
-    try {
-      const pyRes = await loginViaPythonInstagrapi(cleanUsername, password);
-      if (pyRes && pyRes.status === 'ok' && pyRes.sessionid) {
-        const pyCookies = pyRes.cookies || {};
-        pyCookies.sessionid = pyRes.sessionid;
-        if (pyRes.ds_user_id) pyCookies.ds_user_id = String(pyRes.ds_user_id);
-        const scanResult = await scanLiveInstagramInbox(pyCookies, cleanUsername);
-        return res.json({ status: 'ok', authMethod: 'instagrapi', ...scanResult });
-      } else if (pyRes && pyRes.status === 'two_factor_required') {
-        return res.json({
-          status: 'two_factor_required',
-          username: cleanUsername,
-          two_factor_identifier: 'py_2fa',
-          cookies: {},
-        });
-      } else if (pyRes && pyRes.message) {
-        return res.status(401).json({
-          status: 'fail',
-          message: pyRes.message,
-        });
-      }
-    } catch {}
+    if (bridgeRes && bridgeRes.status === 'two_factor_required') {
+      return res.json({
+        status: 'two_factor_required',
+        username: cleanUsername,
+        two_factor_identifier: 'py_2fa',
+      });
+    }
+
+    if (bridgeRes && bridgeRes.status === 'fail') {
+      return res.status(400).json(bridgeRes);
+    }
 
     return res.status(401).json({
       status: 'fail',
-      message: `Unable to sign in as @${cleanUsername}. Please verify your credentials or check Instagram app notifications.`,
+      message: bridgeRes?.message || `Unable to sign in as @${cleanUsername}. Please verify your credentials.`,
     });
   } catch (err: any) {
-    return res.status(500).json({ status: 'fail', message: err.message || 'Login error' });
+    console.error('Login error:', err);
+    return res.status(500).json({
+      status: 'fail',
+      message: err.message || 'An error occurred during login. Please try again.',
+    });
   }
 });
 
 app.post('/api/ig/2fa', async (req, res) => {
   try {
-    const { username, verification_code, two_factor_identifier, cookies = {} } = req.body || {};
+    const { username, verification_code } = req.body || {};
     const cleanUsername = String(username || 'user').trim().replace(/^@/, '');
     const code = String(verification_code || '').trim();
-    const csrfToken = cookies['csrftoken'] || '';
 
-    if (two_factor_identifier === 'py_2fa') {
-      try {
-        const py2fa = await loginViaPythonInstagrapi(cleanUsername, '', code);
-        if (py2fa && py2fa.status === 'ok' && py2fa.sessionid) {
-          const c = py2fa.cookies || {};
-          c.sessionid = py2fa.sessionid;
-          if (py2fa.ds_user_id) c.ds_user_id = String(py2fa.ds_user_id);
-          const scanResult = await scanLiveInstagramInbox(c, cleanUsername);
-          return res.json({ status: 'ok', authMethod: 'instagrapi_2fa', ...scanResult });
-        }
-      } catch {}
+    console.log(`[ReelWrapped] Submitting 2FA verification for @${cleanUsername}...`);
+    const bridgeRes = await runPythonScanBridge([
+      '--action', '2fa',
+      '--username', cleanUsername,
+      '--code', code,
+      '--limit', '10',
+      '--pages', '4',
+    ]);
+
+    if (bridgeRes && bridgeRes.status === 'ok') {
+      return res.json(bridgeRes);
     }
-
-    const web2faBody = new URLSearchParams({
-      username: cleanUsername,
-      verificationCode: code,
-      identifier: two_factor_identifier,
-      queryParams: '{}',
-    }).toString();
-
-    const web2faRes = await rawHttpsRequest(
-      'https://www.instagram.com/api/v1/web/accounts/login/ajax/two_factor/',
-      'POST',
-      {
-        'User-Agent': IG_WEB_UA,
-        Accept: '*/*',
-        'X-Requested-With': 'XMLHttpRequest',
-        'X-CSRFToken': csrfToken,
-        'X-Instagram-AJAX': '1018314112',
-        'X-IG-App-ID': IG_WEB_APP_ID,
-        'X-ASBD-ID': '129477',
-        Referer: 'https://www.instagram.com/accounts/login/',
-        Origin: 'https://www.instagram.com',
-        'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        Cookie: formatCookieHeader(cookies),
-      },
-      web2faBody
-    );
-    const updatedCookies = extractCookies(web2faRes.headers, cookies);
-    let web2faJson: any = {};
-    try {
-      web2faJson = JSON.parse(web2faRes.body || '{}');
-    } catch {}
-
-    if (web2faJson.authenticated && updatedCookies['sessionid']) {
-      const scanResult = await scanLiveInstagramInbox(updatedCookies, cleanUsername);
-      return res.json({ status: 'ok', ...scanResult });
-    }
-
-    return res.status(401).json({
-      status: 'fail',
-      message: web2faJson.message || '? Invalid 2FA verification code. Please try again.',
-    });
+    return res.status(400).json(bridgeRes || { status: 'fail', message: '2FA verification failed' });
   } catch (err: any) {
-    return res.status(500).json({ status: 'fail', message: err.message || '2FA verification failed' });
+    return res.status(500).json({ status: 'fail', message: err.message || '2FA error' });
   }
 });
 

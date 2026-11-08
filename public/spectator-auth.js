@@ -3,6 +3,13 @@
 // 100% Local Privacy • Multi-Account Vault Switcher • Zero External Redirects
 // ============================================================================
 
+// Deregister legacy service workers to prevent stale asset caching
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    for (const r of regs) r.unregister().catch(() => {});
+  }).catch(() => {});
+}
+
 const IN_APP_REEL_STREAMS = [
   "https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-light-dancing-40031-large.mp4",
   "https://assets.mixkit.co/videos/preview/mixkit-man-dancing-under-changing-lights-32809-large.mp4",
@@ -947,20 +954,12 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (scanBtnText) scanBtnText.innerText = '🔐 LOGIN & SCAN LIVE INSTAGRAM DMs';
 
       const scanBtn = document.getElementById('btn-init-scan');
-      if (scanBtn && !document.getElementById('vault-session-input')) {
+      if (scanBtn && !document.getElementById('vault-saved-session-box')) {
         const extraDiv = document.createElement('div');
+        extraDiv.id = 'vault-saved-session-box';
         extraDiv.className = 'space-y-2 pt-1';
         extraDiv.innerHTML = `
-          <div class="bg-emerald-50/90 rounded-xl border-2 border-emerald-400 p-3 space-y-1.5">
-            <div class="flex items-center justify-between">
-              <span class="text-[10px] font-black text-emerald-900 uppercase tracking-wider">🔑 Or Paste Browser ` + '`sessionid`' + ` Cookie</span>
-              <span class="text-[9px] font-mono font-bold bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded">100% Real DMs</span>
-            </div>
-            <p class="text-[10px] text-emerald-800 leading-relaxed">
-              Paste your <code class="font-mono font-bold">sessionid</code> cookie from <code class="font-mono">instagram.com</code> (F12 → Application → Cookies → sessionid) to scan your live DMs immediately:
-            </p>
-            <input id="vault-session-input" type="text" placeholder="Paste sessionid cookie value (optional)" class="w-full px-3 py-2 text-xs font-mono bg-white border border-emerald-300 rounded-xl text-slate-900 focus:outline-none focus:border-emerald-600 shadow-sm">
-          </div>
+          <div id="vault-live-session-pill" class="hidden"></div>
           <div id="vault-login-status" class="hidden p-3 rounded-xl text-[11px] font-mono bg-slate-900 text-emerald-300 border border-slate-800 shadow-inner"></div>
           <div class="pt-2">
             <div class="text-[10px] font-black text-slate-500 uppercase mb-1.5">👥 Saved Multi-User Accounts on Device</div>
@@ -1080,13 +1079,6 @@ window.addEventListener('DOMContentLoaded', async () => {
               <span class="text-slate-400 group-open:rotate-180 transition-transform text-[10px]">▼</span>
             </summary>
             <div class="p-3.5 pt-0 space-y-3 border-t border-slate-200/60 mt-1">
-              <!-- Optional Cookie Paste -->
-              <div class="space-y-1 pt-2">
-                <label class="text-[10px] font-bold text-slate-600 uppercase block">Optional: Session Cookie Bypass</label>
-                <input id="start-session-input" type="text" placeholder="Paste sessionid cookie value (optional)" class="w-full px-3 py-2 text-xs font-mono bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:border-purple-600 shadow-sm">
-                <p class="text-[9px] text-slate-500">Only needed if Instagram blocks browser logins on your IP.</p>
-              </div>
-
               <!-- Terminal Launchers -->
               <div class="space-y-1.5 pt-2 border-t border-slate-200/60">
                 <span class="text-[10px] font-bold text-slate-600 uppercase block">Run Locally via Terminal</span>
@@ -1202,29 +1194,57 @@ window.addEventListener('DOMContentLoaded', async () => {
     const savedRes = await fetch('/api/ig/saved-session');
     if (savedRes.ok) {
       const savedData = await savedRes.json();
-      if (savedData && savedData.exists && savedData.username && savedData.sessionid) {
+      if (savedData && savedData.exists && savedData.username) {
         const banner = document.getElementById('start-saved-session-banner');
         if (banner) {
           banner.classList.remove('hidden');
           banner.innerHTML = `
-            <div class="p-3 rounded-2xl bg-gradient-to-r from-purple-50 via-pink-50 to-amber-50 border-2 border-purple-300 flex items-center justify-between gap-2.5 shadow-sm">
-              <div class="flex items-center gap-2.5 min-w-0">
-                <div class="w-8 h-8 rounded-full brand-gradient-bg text-white font-black text-xs flex items-center justify-center shrink-0">
-                  ${savedData.username.slice(0, 2).toUpperCase()}
+            <div class="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-purple-50 border-2 border-emerald-400 shadow-md space-y-2.5">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="w-10 h-10 rounded-2xl brand-gradient-bg text-white font-black text-sm flex items-center justify-center shrink-0 shadow">
+                    ${savedData.username.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-[9px] font-black text-emerald-700 uppercase tracking-wider flex items-center gap-1">
+                      <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      LOCAL INSTAGRAM SESSION READY
+                    </div>
+                    <div class="text-sm font-black text-slate-900 truncate">@${savedData.username}</div>
+                  </div>
                 </div>
-                <div class="min-w-0">
-                  <div class="text-[9px] font-black text-purple-700 uppercase tracking-wider">Device Session Found</div>
-                  <div class="text-xs font-black text-slate-900 truncate">@${savedData.username}</div>
-                </div>
+                <span class="text-[9px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full">
+                  Zero Login Needed
+                </span>
               </div>
-              <button type="button" onclick="loginWithSavedSession('${savedData.username}', '${savedData.sessionid}')" class="px-3 py-1.5 rounded-xl brand-gradient-bg text-white font-black text-[11px] shadow-sm hover:opacity-90 active:scale-95 transition-all shrink-0">
-                1-Tap Login →
+              <button type="button" onclick="loginWithSavedSession('${savedData.username}', 'active_local_session')" class="w-full py-3 px-4 rounded-xl brand-gradient-bg text-white font-black text-xs shadow-md shadow-pink-500/25 hover:opacity-95 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
+                <span>⚡</span>
+                <span>LOAD LIVE INSTAGRAM REELS WRAPPED NOW →</span>
               </button>
             </div>
           `;
         }
+
+        const vaultPill = document.getElementById('vault-live-session-pill');
+        if (vaultPill) {
+          vaultPill.classList.remove('hidden');
+          vaultPill.innerHTML = `
+            <div class="p-3 rounded-2xl bg-emerald-50 border-2 border-emerald-300 flex items-center justify-between gap-2 shadow-sm">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span class="text-xs font-black text-slate-900 truncate">Active Session: @${savedData.username}</span>
+              </div>
+              <button type="button" onclick="loginWithSavedSession('${savedData.username}', 'active_local_session')" class="px-3 py-1.5 rounded-xl brand-gradient-bg text-white font-black text-[11px] shadow hover:opacity-90 transition-all shrink-0">
+                Load DMs →
+              </button>
+            </div>
+          `;
+        }
+
         const uInput = document.getElementById('start-username-input');
         if (uInput && !uInput.value) uInput.value = savedData.username;
+        const vuInput = document.getElementById('vault-username-input');
+        if (vuInput && !vuInput.value) vuInput.value = savedData.username;
       }
     }
   } catch (_) {}

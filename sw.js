@@ -1,7 +1,5 @@
-const CACHE_NAME = 'reel-wrapped-rust-v2';
+const CACHE_NAME = 'reel-wrapped-v3-live';
 const PRECACHE_ASSETS = [
-  './',
-  './index.html',
   './manifest.json',
   './icon.svg',
   './pwa-192x192.png',
@@ -19,7 +17,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(keys.map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -29,18 +27,23 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.pathname.startsWith('/api/')) return;
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request)
+  // Network-first for all code/html assets so updates are immediate
+  if (url.pathname.endsWith('.html') || url.pathname.endsWith('.js') || url.pathname === '/') {
+    event.respondWith(
+      fetch(event.request)
         .then((networkRes) => {
-          if (networkRes && networkRes.status === 200 && (url.origin === self.location.origin || url.hostname.includes('fonts.'))) {
+          if (networkRes && networkRes.status === 200) {
             const clone = networkRes.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
           return networkRes;
         })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(event.request).then((cached) => cached || fetch(event.request))
   );
 });
