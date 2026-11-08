@@ -1,0 +1,17 @@
+node_modules/
+dist/
+server.js
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+target/
+rust-engine/target/
+public/assets/
+session.json
+reel_wrapped_local_vault.json
+.ig_toolkit/
+android/
+
+*.apk

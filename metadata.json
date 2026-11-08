@@ -1,0 +1,6 @@
+{
+  "name": "Reel Wrapped",
+  "description": "100% Local-First Instagram Reel analytics, inbox leaderboards, friend dossiers, and viral 9:16 Story card exports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

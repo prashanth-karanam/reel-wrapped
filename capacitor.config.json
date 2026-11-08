@@ -1,0 +1,9 @@
+{
+  "appId": "io.github.prashanthkaranam.reelwrapped",
+  "appName": "Reel Wrapped 25",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

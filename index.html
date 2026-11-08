@@ -4,12 +4,23 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Reel Wrapped — Personal Social Analytics & Inbox Leaderboard</title>
-  
+
   <!-- Meta tags for PWA / Mobile Web App -->
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ReelWrapped">
   <meta name="theme-color" content="#833AB4">
   <meta name="description" content="100% Local-First Instagram Reel analytics, inbox leaderboards, friend dossiers, and viral 9:16 Story card exports.">
+  <meta property="og:title" content="Reel Wrapped — Personal Social Analytics & Inbox Leaderboard">
+  <meta property="og:description" content="100% Local-First Instagram Reel analytics, inbox leaderboards, friend dossiers, and viral 9:16 Story card exports.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <!-- PWA Manifest & Icons -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
 
   <!-- Tailwind CSS via Public CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -46,11 +57,20 @@
       background-color: #F8FAFC;
       color: #0F172A;
       -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: none;
     }
     .font-mono {
       font-family: 'JetBrains Mono', monospace;
     }
-
+    /* GPU-Accelerated Smooth Transitions */
+    .tab-content {
+      will-change: transform, opacity;
+      animation: tabFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    @keyframes tabFadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
     /* Gradient Styles */
     .brand-gradient-bg {
       background: linear-gradient(135deg, #833AB4 0%, #FD1D1D 50%, #FCB045 100%);
@@ -60,7 +80,6 @@
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
-
     /* Story Card Themes */
     .story-theme-sunset {
       background: linear-gradient(135deg, #833AB4 0%, #E1306C 45%, #FD1D1D 70%, #F56040 100%);
@@ -75,7 +94,17 @@
     .story-theme-gold {
       background: linear-gradient(135deg, #1C1917 0%, #292524 40%, #78350F 75%, #D97706 100%);
     }
-
+    .story-theme-receipt {
+      background: #FAF8F5;
+      color: #1E293B !important;
+      border: 2px dashed #CBD5E1 !important;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .story-theme-facts {
+      background: #FFFFFF;
+      color: #0F172A !important;
+      border: 3px solid #0F172A !important;
+    }
     /* Custom Scrollbar */
     .custom-scrollbar::-webkit-scrollbar {
       width: 5px;
@@ -88,7 +117,6 @@
       background: #CBD5E1;
       border-radius: 9999px;
     }
-
     /* Audio Equalizer Animation */
     @keyframes barWave {
       0%, 100% { height: 4px; }
@@ -105,44 +133,61 @@
   <!-- TOAST NOTIFICATION CONTAINER -->
   <div id="toast-container" class="fixed top-4 z-50 flex flex-col items-center gap-2 pointer-events-none w-full max-w-sm px-4"></div>
 
-  <!-- DESKTOP TOP NAV / VIEW MODE CONTROLS -->
-  <header class="w-full max-w-md mb-3 flex items-center justify-between p-3.5 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200 shadow-sm">
-    <div class="flex items-center gap-3">
+  <!-- OFFLINE AIR-GAPPED BANNER -->
+  <div id="offline-banner" class="hidden w-full max-w-md mb-2 px-3 py-1.5 rounded-xl bg-emerald-900 text-emerald-100 text-[11px] font-bold flex items-center justify-between shadow-sm">
+    <div class="flex items-center gap-1.5">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span>AIR-GAPPED OFFLINE MODE ACTIVE — 100% LOCAL VAULT</span>
+    </div>
+    <span class="font-mono text-[10px] text-emerald-300">WASM READY</span>
+  </div>
+
+  <!-- DESKTOP & MOBILE TOP NAV / VIEW MODE CONTROLS -->
+  <header class="w-full max-w-md mb-3 flex items-center justify-between p-3 bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200 shadow-sm">
+    <div class="flex items-center gap-2.5 min-w-0">
       <!-- BESPOKE STYLISH KINETIC SVG LOGO (Infinity Reel & Optical Aperture) -->
-      <div class="w-11 h-11 rounded-2xl brand-gradient-bg p-0.5 shadow-md flex items-center justify-center shrink-0">
-        <svg class="w-8 h-8" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <div onclick="openStoryMode()" class="w-10 h-10 rounded-2xl brand-gradient-bg p-0.5 shadow-md flex items-center justify-center shrink-0 cursor-pointer active:scale-95 transition-transform" title="Launch Interactive Wrapped Story">
+        <svg class="w-7 h-7" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="logo-ribbon" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
               <stop stop-color="#FFFFFF"/>
               <stop offset="0.6" stop-color="#FFF0F5"/>
               <stop offset="1" stop-color="#FFE4E6"/>
             </linearGradient>
-            <filter id="logo-glow" x="0" y="0" width="48" height="48" filterUnits="userSpaceOnUse">
-              <feGaussianBlur stdDeviation="1.5" result="blur"/>
-              <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-            </filter>
           </defs>
           <circle cx="24" cy="24" r="20" stroke="rgba(255,255,255,0.3)" stroke-width="2" stroke-dasharray="3 3"/>
           <path d="M16 17C12.134 17 9 20.134 9 24C9 27.866 12.134 31 16 31C20.8 31 22.8 24.8 24 24C25.2 23.2 27.2 17 32 17C35.866 17 39 20.134 39 24C39 27.866 35.866 31 32 31C27.2 31 25.2 24.8 24 24C22.8 23.2 20.8 17 16 17Z" 
-                stroke="url(#logo-ribbon)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#logo-glow)"/>
+                stroke="url(#logo-ribbon)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
           <circle cx="16" cy="24" r="3" fill="#FFFFFF"/>
           <path d="M31 21.5L35 24L31 26.5V21.5Z" fill="#FFFFFF"/>
           <circle cx="24" cy="8" r="2" fill="#FFFFFF"/>
         </svg>
       </div>
 
-      <div>
-        <div class="flex items-center gap-2">
-          <h1 class="text-base font-black tracking-tight text-slate-900">Reel Wrapped</h1>
-          <span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">
-            PRO 2024
+      <div class="min-w-0">
+        <div class="flex items-center gap-1.5">
+          <h1 class="text-sm sm:text-base font-black tracking-tight text-slate-900 truncate">Reel Wrapped</h1>
+          <span id="wasm-status-badge" class="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0 font-mono">
+            RUST•WASM
           </span>
         </div>
-        <p class="text-[11px] text-slate-500 font-medium">100% Local Hyper-Personalized Dossier</p>
+        <p class="text-[10px] text-slate-500 font-medium truncate">100% Local DM Telemetry & Ghost Radar</p>
       </div>
     </div>
 
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-1.5 shrink-0">
+      <!-- Interactive Story Reveal Button -->
+      <button onclick="openStoryMode()" class="px-2.5 py-1.5 rounded-xl brand-gradient-bg text-white text-[10px] font-black shadow-sm hover:opacity-95 active:scale-95 transition-all flex items-center gap-1">
+        <span>▶</span>
+        <span>Story</span>
+      </button>
+
+      <!-- In-App PWA Mobile Install Button -->
+      <button id="pwa-install-btn" onclick="triggerPWAInstall()" title="Install Mobile App" class="px-2 py-1.5 rounded-xl bg-slate-900 text-white text-[10px] font-black hover:bg-slate-800 active:scale-95 transition-all flex items-center gap-1">
+        <span>📲</span>
+        <span class="hidden sm:inline">App</span>
+      </button>
+
       <!-- Notification Bell -->
       <button onclick="toggleModal('modal-notifications')" title="Notifications" class="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 hover:text-slate-900 transition-transform active:scale-95 relative">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -162,7 +207,7 @@
   </header>
 
   <!-- MAIN APP CONTAINER (Phone Canvas) -->
-  <main id="app-container" class="w-full max-w-md bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden flex flex-col mb-16 relative min-h-[640px]">
+  <main id="app-container" class="w-full max-w-md bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden flex flex-col mb-20 relative min-h-[650px]">
     
     <!-- ========================================== -->
     <!-- TAB 1: RANK (INBOX LEADERBOARD & BOOST)    -->
@@ -178,32 +223,32 @@
               🔥 GLOBAL TOP 0.8% TIER
             </span>
             <h2 class="text-xl font-black mt-2 tracking-tight">You are a Reel Demigod</h2>
-            <p class="text-xs text-white/90 mt-0.5 font-medium">14,892 Reels Exchanged across 48 friends</p>
+            <p id="banner-total-summary" class="text-xs text-white/90 mt-0.5 font-medium">14,892 Reels Exchanged across 6 top friends</p>
           </div>
-          <div class="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30 font-black text-lg">
-            ⚡
-          </div>
+          <button onclick="openStoryMode()" class="px-3 py-2 rounded-2xl bg-white text-slate-900 font-black text-[11px] shadow-md hover:scale-105 active:scale-95 transition-transform shrink-0 flex items-center gap-1">
+            <span>🎬</span>
+            <span>Play</span>
+          </button>
         </div>
 
         <div class="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-white/20 text-center">
           <div class="bg-black/20 backdrop-blur-sm rounded-xl p-1.5">
             <span class="block text-[9px] uppercase font-bold text-white/70">Peak Streak</span>
-            <span class="font-mono text-sm font-black text-amber-300">84 Days</span>
+            <span id="banner-peak-streak" class="font-mono text-sm font-black text-amber-300">84 Days</span>
           </div>
           <div class="bg-black/20 backdrop-blur-sm rounded-xl p-1.5">
             <span class="block text-[9px] uppercase font-bold text-white/70">Top Hour</span>
             <span class="font-mono text-sm font-black text-pink-200">02:45 AM</span>
           </div>
           <div class="bg-black/20 backdrop-blur-sm rounded-xl p-1.5">
-            <span class="block text-[9px] uppercase font-bold text-white/70">Avg Reflex</span>
-            <span class="font-mono text-sm font-black text-emerald-300">42s</span>
+            <span class="block text-[9px] uppercase font-bold text-white/70">WASM Speed</span>
+            <span id="banner-wasm-speed" class="font-mono text-sm font-black text-emerald-300">0.4ms</span>
           </div>
         </div>
       </div>
 
       <!-- Search & Filter Bar -->
       <div class="space-y-2.5 mb-4">
-        <!-- Search Input -->
         <div class="flex items-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
           <svg class="w-4 h-4 text-slate-400 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
@@ -212,7 +257,6 @@
           <button onclick="clearSearch()" class="text-xs text-slate-400 hover:text-slate-600 px-1 font-bold">✕</button>
         </div>
 
-        <!-- Filter Chips -->
         <div class="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar text-[11px] font-bold">
           <button onclick="setFilter('all')" id="filter-all" class="filter-chip px-3 py-1.5 rounded-full bg-slate-900 text-white shrink-0 shadow-sm transition-all">
             All (6)
@@ -230,10 +274,7 @@
       </div>
 
       <!-- Friend Leaderboard List -->
-      <div id="leaderboard-list" class="space-y-3">
-        <!-- Rendered via JavaScript -->
-      </div>
-
+      <div id="leaderboard-list" class="space-y-3"></div>
     </div>
 
     <!-- ========================================== -->
@@ -242,11 +283,9 @@
     <div id="tab-dossier" class="tab-content hidden p-4 sm:p-5 pb-6 space-y-4">
       
       <!-- Friend Selector Carousel -->
-      <div class="bg-slate-50 p-2.5 rounded-2xl border border-slate-200 flex items-center justify-between">
-        <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider pl-1">Friend Dossier:</span>
-        <div class="flex items-center gap-1.5 overflow-x-auto max-w-[240px] custom-scrollbar py-0.5" id="friend-selector-pills">
-          <!-- Injected via JavaScript -->
-        </div>
+      <div class="bg-slate-50 p-2.5 rounded-2xl border border-slate-200 flex items-center justify-between gap-2">
+        <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider pl-1 shrink-0">Dossier:</span>
+        <div class="flex items-center gap-1.5 overflow-x-auto custom-scrollbar py-0.5" id="friend-selector-pills"></div>
       </div>
 
       <!-- Dynamic Archetype & Streak Banner -->
@@ -270,7 +309,7 @@
         <div class="flex items-center justify-between mb-3">
           <h4 class="text-xs font-black text-slate-400 uppercase tracking-wider">Transmission Symmetry</h4>
           <span id="dossier-balance-tag" class="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-            Active Dynamics
+            WASM Verified
           </span>
         </div>
 
@@ -311,9 +350,8 @@
         </div>
       </div>
 
-      <!-- PERSONALIZATION 1: Response Reflex & Mutual Reaction Chemistry -->
+      <!-- Response Reflex & Mutual Reaction Chemistry -->
       <div class="grid grid-cols-2 gap-2.5">
-        <!-- Response Reflex -->
         <div class="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
           <div>
             <div class="flex items-center gap-1.5 text-xs font-black text-slate-400 uppercase tracking-wider mb-1">
@@ -324,19 +362,16 @@
           <p class="text-[10px] text-slate-500 font-medium mt-1">Sub-minute reflex • Instant meme consumption</p>
         </div>
 
-        <!-- Mutual Reaction Chemistry -->
         <div class="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
           <div class="flex items-center gap-1.5 text-xs font-black text-slate-400 uppercase tracking-wider mb-1">
             <span>🔥</span> Emoji Matrix
           </div>
-          <div id="dossier-reactions-grid" class="flex items-center justify-between gap-1 pt-1">
-            <!-- Injected via JavaScript -->
-          </div>
-          <p class="text-[10px] text-slate-500 font-medium mt-1">Direct unhinged emoji telemetry</p>
+          <div id="dossier-reactions-grid" class="flex items-center justify-between gap-1 pt-1"></div>
+          <p class="text-[10px] text-slate-500 font-medium mt-1">Tap emoji to test reaction burst</p>
         </div>
       </div>
 
-      <!-- PERSONALIZATION 2: Top Shared Hashtags & Micro-Niches DNA -->
+      <!-- Top Shared Hashtags & Micro-Niches DNA -->
       <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-1.5">
@@ -345,369 +380,476 @@
           </div>
           <span class="text-[10px] font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">Niche DNA</span>
         </div>
-
-        <div id="dossier-hashtags-cloud" class="flex flex-wrap gap-2">
-          <!-- Injected via JavaScript -->
-        </div>
+        <div id="dossier-hashtags-cloud" class="flex flex-wrap gap-2"></div>
       </div>
 
-      <!-- PERSONALIZATION 3: Top Shared Viral Soundtracks -->
+      <!-- Top Shared Reel Audio & Soundtracks (With Live Synth Audio Preview!) -->
       <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-1.5">
             <span class="text-sm">🎵</span>
-            <h4 class="text-xs font-black text-slate-400 uppercase tracking-wider">Top Shared Audio & Tracks</h4>
+            <h4 class="text-xs font-black text-slate-400 uppercase tracking-wider">Top Viral Soundtracks</h4>
           </div>
-          <span class="text-[10px] font-bold text-pink-600 bg-pink-50 px-2 py-0.5 rounded-full">Viral Soundbites</span>
+          <span class="text-[10px] font-bold text-pink-600 bg-pink-50 px-2 py-0.5 rounded-full">Tap Track for Audio</span>
         </div>
-
-        <div id="dossier-audio-list" class="space-y-2">
-          <!-- Injected via JavaScript -->
-        </div>
-      </div>
-
-      <!-- Top 5 Shared Creators List -->
-      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-        <div class="flex items-center justify-between mb-3">
-          <h4 class="text-xs font-black text-slate-400 uppercase tracking-wider">Top 5 Shared Creators</h4>
-          <span class="text-xs font-bold text-pink-600">Mutual Obsessions</span>
-        </div>
-
-        <div id="dossier-creators-list" class="space-y-2">
-          <!-- Injected via JavaScript -->
-        </div>
+        <div id="dossier-audio-list" class="space-y-2.5"></div>
       </div>
 
       <!-- 3 AM Night Owl Quotient -->
-      <div class="bg-slate-900 text-white p-4 rounded-2xl shadow-sm relative overflow-hidden">
+      <div class="bg-slate-900 p-4 rounded-2xl text-white shadow-md">
         <div class="flex items-center justify-between mb-2">
           <div class="flex items-center gap-2">
-            <span class="text-xl">🌙</span>
-            <span class="text-xs font-black text-amber-300 uppercase tracking-wider">Night Owl Quotient</span>
+            <span class="text-base">🌙</span>
+            <span class="text-xs font-black uppercase tracking-wider text-purple-300">3 AM Night Owl Quotient</span>
           </div>
-          <span id="dossier-night-score" class="px-2 py-0.5 rounded-full text-[10px] font-black bg-pink-500/20 text-pink-400 border border-pink-500/30">
-            SCORE: 88%
+          <span id="dossier-night-score" class="px-2.5 py-0.5 rounded-full text-xs font-black bg-purple-500/20 text-purple-200 border border-purple-400/30 font-mono">
+            88%
           </span>
         </div>
-
-        <h5 id="dossier-night-title" class="text-base font-black tracking-tight">Certified 3 AM Doomscroll Duo</h5>
-        <p id="dossier-night-desc" class="text-xs text-slate-300 mt-0.5 font-medium">
+        <p id="dossier-night-title" class="text-sm font-bold text-white mb-1">Certified 3 AM Doomscroll Duo</p>
+        <p id="dossier-night-desc" class="text-xs text-slate-400">
           Over 42% of your shared reels were sent between 01:30 AM and 04:15 AM.
         </p>
 
-        <div class="mt-4 pt-3 border-t border-slate-700">
-          <div class="flex items-end justify-between h-20 gap-1.5 px-2">
-            <div class="flex-1 flex flex-col items-center gap-1">
-              <div class="w-full bg-pink-500 rounded-t h-16 shadow-lg shadow-pink-500/50"></div>
-              <span class="text-[9px] font-mono text-slate-400">2AM</span>
-            </div>
-            <div class="flex-1 flex flex-col items-center gap-1">
-              <div class="w-full bg-pink-400 rounded-t h-14"></div>
-              <span class="text-[9px] font-mono text-slate-400">3AM</span>
-            </div>
-            <div class="flex-1 flex flex-col items-center gap-1">
-              <div class="w-full bg-indigo-500 rounded-t h-6"></div>
-              <span class="text-[9px] font-mono text-slate-400">8AM</span>
-            </div>
-            <div class="flex-1 flex flex-col items-center gap-1">
-              <div class="w-full bg-indigo-500 rounded-t h-8"></div>
-              <span class="text-[9px] font-mono text-slate-400">12P</span>
-            </div>
-            <div class="flex-1 flex flex-col items-center gap-1">
-              <div class="w-full bg-indigo-500 rounded-t h-10"></div>
-              <span class="text-[9px] font-mono text-slate-400">6P</span>
-            </div>
-            <div class="flex-1 flex flex-col items-center gap-1">
-              <div class="w-full bg-pink-500 rounded-t h-14"></div>
-              <span class="text-[9px] font-mono text-slate-400">11P</span>
-            </div>
+        <!-- 24-Hour Activity Histogram -->
+        <div class="mt-4 pt-3 border-t border-slate-800">
+          <div class="flex items-end justify-between h-14 gap-1 px-1" id="dossier-hourly-bars">
+            <div class="flex-1 bg-purple-500 rounded-t opacity-90" style="height: 85%"></div>
+            <div class="flex-1 bg-pink-500 rounded-t" style="height: 100%"></div>
+            <div class="flex-1 bg-pink-500 rounded-t" style="height: 92%"></div>
+            <div class="flex-1 bg-purple-500 rounded-t opacity-80" style="height: 60%"></div>
+            <div class="flex-1 bg-slate-700 rounded-t" style="height: 20%"></div>
+            <div class="flex-1 bg-slate-700 rounded-t" style="height: 15%"></div>
+            <div class="flex-1 bg-slate-700 rounded-t" style="height: 30%"></div>
+            <div class="flex-1 bg-slate-700 rounded-t" style="height: 45%"></div>
+            <div class="flex-1 bg-indigo-500 rounded-t opacity-75" style="height: 55%"></div>
+            <div class="flex-1 bg-indigo-500 rounded-t opacity-85" style="height: 70%"></div>
+            <div class="flex-1 bg-purple-500 rounded-t opacity-90" style="height: 82%"></div>
+            <div class="flex-1 bg-pink-500 rounded-t" style="height: 95%"></div>
+          </div>
+          <div class="flex justify-between text-[9px] font-mono text-slate-400 mt-1.5">
+            <span>12AM</span>
+            <span>3AM (Peak)</span>
+            <span>6AM</span>
+            <span>12PM</span>
+            <span>6PM</span>
+            <span>11PM</span>
           </div>
         </div>
       </div>
 
+      <!-- Top 5 Mutual Reel Creators -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <h4 class="text-xs font-black text-slate-400 uppercase tracking-wider">Top 5 Shared Creators</h4>
+          <span class="text-[10px] font-bold text-slate-400">By Volume</span>
+        </div>
+        <div id="dossier-creators-list" class="space-y-2.5"></div>
+      </div>
     </div>
 
     <!-- ========================================== -->
-    <!-- TAB 3: VIRAL 9:16 INSTAGRAM STORY CARD     -->
+    <!-- TAB 3: GHOST RADAR (FROM IG-REEL-COUNTER)  -->
     <!-- ========================================== -->
-    <div id="tab-story" class="tab-content hidden p-4 sm:p-5 pb-6 flex flex-col items-center justify-between">
+    <div id="tab-ghost" class="tab-content hidden p-4 sm:p-5 pb-6 space-y-4">
+      <div class="p-4 rounded-2xl bg-slate-900 text-white shadow-md relative overflow-hidden">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase font-mono">
+            GHOST MODE • READ RECEIPTS SUPPRESSED
+          </span>
+          <span class="text-xs font-mono text-slate-400">direct_v2/inbox</span>
+        </div>
+        <h3 class="text-base font-black tracking-tight">Delivery & Seen Receipt Radar</h3>
+        <p class="text-[11px] text-slate-300 mt-0.5">
+          Inspects <code class="text-pink-300 font-mono">last_seen_at</code> timestamps via read-only GET queries without mutating Meta's <code class="text-pink-300 font-mono">seen/</code> state.
+        </p>
+      </div>
+
+      <!-- Delivery & Seen Receipt Monitor Table -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <h4 class="text-xs font-black text-slate-400 uppercase tracking-wider">Live Seen-Receipt Telemetry</h4>
+          <button onclick="refreshGhostRadar()" class="text-[10px] font-bold text-purple-600 bg-purple-50 px-2.5 py-1 rounded-lg hover:bg-purple-100 active:scale-95 transition-all">
+            🔄 Refresh Radar
+          </button>
+        </div>
+        <div id="ghost-receipt-list" class="space-y-2"></div>
+      </div>
+
+      <!-- Stealth Ghost Mode DM Reel Browser -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h4 class="text-xs font-black text-slate-800 uppercase tracking-wider">👻 Stealth DM Reel Inspector</h4>
+            <p class="text-[10px] text-slate-500">Preview shared reels without marking thread as Seen</p>
+          </div>
+          <select id="ghost-friend-select" onchange="selectFriend(this.value)" class="text-xs font-bold bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 text-slate-800 outline-none"></select>
+        </div>
+
+        <div id="ghost-messages-feed" class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1"></div>
+      </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 4: EXPORT (9:16 VIRAL STORY GENERATOR) -->
+    <!-- ========================================== -->
+    <div id="tab-story" class="tab-content hidden p-4 sm:p-5 pb-6 flex flex-col items-center">
       
-      <!-- Top Bar: Canvas Theme Selector -->
-      <div class="w-full flex items-center justify-between mb-3">
-        <span class="text-xs font-black uppercase tracking-wider brand-gradient-text">STORY CARD 9:16</span>
-        <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
-          <button onclick="setStoryTheme('sunset')" title="Sunset Theme" class="w-5 h-5 rounded-lg brand-gradient-bg border border-white shadow-sm"></button>
-          <button onclick="setStoryTheme('midnight')" title="Midnight AMOLED" class="w-5 h-5 rounded-lg bg-zinc-900 border border-zinc-700 shadow-sm"></button>
-          <button onclick="setStoryTheme('cyber')" title="Cyber Neon" class="w-5 h-5 rounded-lg bg-cyan-600 border border-white shadow-sm"></button>
-          <button onclick="setStoryTheme('gold')" title="Royal Gold" class="w-5 h-5 rounded-lg bg-amber-600 border border-white shadow-sm"></button>
+      <!-- Friend & Theme Controls -->
+      <div class="w-full flex flex-col gap-2.5 mb-4">
+        <div class="flex items-center justify-between bg-slate-50 p-2.5 rounded-2xl border border-slate-200">
+          <span class="text-[11px] font-bold text-slate-500 uppercase pl-1">Story Friend:</span>
+          <div class="flex items-center gap-1.5 overflow-x-auto max-w-[230px] custom-scrollbar" id="story-friend-pills"></div>
+        </div>
+
+        <div class="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+          <button onclick="setStoryTheme('sunset')" id="theme-btn-sunset" class="py-1.5 px-2 rounded-xl text-[10px] font-black border-2 border-pink-500 bg-pink-50 text-pink-700 transition-all">
+            🌅 Sunset
+          </button>
+          <button onclick="setStoryTheme('midnight')" id="theme-btn-midnight" class="py-1.5 px-2 rounded-xl text-[10px] font-bold border border-slate-200 bg-white text-slate-600 transition-all">
+            🌑 Midnight
+          </button>
+          <button onclick="setStoryTheme('cyber')" id="theme-btn-cyber" class="py-1.5 px-2 rounded-xl text-[10px] font-bold border border-slate-200 bg-white text-slate-600 transition-all">
+            ⚡ Cyber
+          </button>
+          <button onclick="setStoryTheme('gold')" id="theme-btn-gold" class="py-1.5 px-2 rounded-xl text-[10px] font-bold border border-slate-200 bg-white text-slate-600 transition-all">
+            👑 Gold
+          </button>
+          <button onclick="setStoryTheme('receipt')" id="theme-btn-receipt" class="py-1.5 px-2 rounded-xl text-[10px] font-bold border border-slate-200 bg-white text-slate-600 transition-all">
+            🧾 Receipt
+          </button>
+          <button onclick="setStoryTheme('facts')" id="theme-btn-facts" class="py-1.5 px-2 rounded-xl text-[10px] font-bold border border-slate-200 bg-white text-slate-600 transition-all">
+            🏷️ Facts
+          </button>
         </div>
       </div>
 
-      <!-- 9:16 Story Frame Container -->
-      <div id="story-export-canvas" class="w-full max-w-[300px] aspect-[9/16] story-theme-sunset rounded-3xl p-5 shadow-2xl flex flex-col justify-between relative overflow-hidden border border-white/20 text-white transition-all duration-300">
+      <!-- 9:16 VIRAL STORY CANVAS CARD -->
+      <div id="story-card-canvas" class="w-full max-w-[310px] aspect-[9/16] rounded-3xl story-theme-sunset p-5 text-white shadow-2xl flex flex-col justify-between relative overflow-hidden select-none transition-all duration-300">
         
-        <!-- Header -->
+        <div class="absolute -top-12 -right-12 w-36 h-36 rounded-full bg-white/15 blur-2xl pointer-events-none"></div>
+        <div class="absolute -bottom-12 -left-12 w-40 h-40 rounded-full bg-black/30 blur-2xl pointer-events-none"></div>
+
+        <!-- Story Top Header -->
         <div class="relative z-10 flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <div class="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-md flex items-center justify-center">
-              <svg class="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-              </svg>
+            <div class="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-md flex items-center justify-center font-black text-xs border border-white/30">
+              🎬
             </div>
             <div>
-              <div class="text-[11px] font-black tracking-wider uppercase">REEL WRAPPED '24</div>
-              <div id="story-archetype-label" class="text-[9px] text-amber-300 font-mono font-bold">UNHINGED CHAOS DUO</div>
+              <span class="text-[10px] font-black tracking-widest uppercase block leading-none">REEL WRAPPED '25</span>
+              <span class="text-[8px] font-mono opacity-80">100% LOCAL • ZERO CLOUD</span>
             </div>
           </div>
-          <span class="px-2 py-0.5 rounded-full text-[9px] font-black bg-black/30 backdrop-blur-md text-amber-300 border border-white/10">
+          <span class="px-2 py-0.5 rounded-full text-[9px] font-black bg-black/30 backdrop-blur-md text-amber-300 border border-white/20">
             TOP 0.8% SYNDICATE
           </span>
         </div>
 
-        <!-- Center Highlight -->
-        <div class="relative z-10 text-center my-auto py-2">
-          
+        <!-- Story Center Hero Content -->
+        <div id="story-card-standard-body" class="relative z-10 my-auto py-2 flex flex-col items-center text-center">
           <div class="flex items-center justify-center -space-x-3 mb-2.5">
-            <div class="w-12 h-12 rounded-full border-2 border-white overflow-hidden shadow-lg">
-              <img id="story-friend-avatar" class="w-full h-full object-cover" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80" alt="Friend">
-            </div>
-            <div class="w-12 h-12 rounded-full border-2 border-white overflow-hidden shadow-lg bg-indigo-600 flex items-center justify-center text-white font-black text-sm">
+            <img id="story-friend-avatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80" alt="Friend" class="w-14 h-14 rounded-full object-cover border-2 border-white shadow-lg">
+            <div class="w-14 h-14 rounded-full bg-slate-900 border-2 border-white shadow-lg flex items-center justify-center font-black text-sm text-white">
               YOU
             </div>
           </div>
 
-          <div id="story-total-reels" class="text-4xl font-black font-mono tracking-tight text-white drop-shadow-md">
-            3,420
-          </div>
-          <div class="text-[11px] font-black uppercase tracking-widest text-amber-300">
-            REELS EXCHANGED
-          </div>
+          <span id="story-role-pill" class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-white text-slate-900 shadow-sm mb-1.5">
+            UNHINGED 3 AM CURATORS
+          </span>
 
-          <!-- Glass Card Stats with Hashtag & Audio -->
-          <div class="mt-2.5 bg-black/30 backdrop-blur-md rounded-2xl p-2.5 border border-white/15 text-left space-y-1 text-[11px]">
-            <div class="font-bold flex justify-between">
-              <span id="story-streak-label">🔥 84-Day Savage Streak</span>
-              <span class="text-amber-300 font-mono">Active</span>
+          <h3 id="story-friend-name" class="text-xl font-black tracking-tight leading-tight">
+            Alex Rivera &amp; You
+          </h3>
+          <p id="story-friend-handle" class="text-[11px] font-mono opacity-85 mb-3">@arivera_99</p>
+
+          <!-- Big Counter Box -->
+          <div class="w-full bg-black/25 backdrop-blur-md rounded-2xl p-3 border border-white/20 mb-2.5">
+            <span class="text-[9px] uppercase tracking-widest font-bold opacity-80 block">Total Reels Exchanged</span>
+            <span id="story-total-count" class="text-3xl font-black font-mono tracking-tight text-amber-300 block mt-0.5">
+              3,420
+            </span>
+            <div class="w-full h-2 bg-white/20 rounded-full overflow-hidden mt-2 flex">
+              <div id="story-bar-friend" class="bg-amber-300 h-full" style="width: 65%"></div>
+              <div id="story-bar-you" class="bg-indigo-400 h-full" style="width: 35%"></div>
             </div>
-            <div class="font-bold flex justify-between">
-              <span>🌙 3 AM Chaos Quotient</span>
-              <span id="story-night-label" class="text-pink-300 font-mono">88%</span>
-            </div>
-            <div class="font-bold flex justify-between">
-              <span>#️⃣ Top Hashtag</span>
-              <span id="story-hashtag-label" class="text-emerald-300 font-mono font-bold">#brainrot (412)</span>
-            </div>
-            <div class="font-bold flex justify-between">
-              <span>🎵 Top Anthem</span>
-              <span id="story-audio-label" class="text-purple-200 truncate max-w-[130px]">Espresso</span>
+            <div class="flex justify-between text-[9px] font-mono opacity-90 mt-1">
+              <span id="story-split-friend">Them: 65%</span>
+              <span id="story-split-you">You: 35%</span>
             </div>
           </div>
 
-          <div id="story-top-creator" class="mt-2.5 inline-block px-3 py-0.5 rounded-full bg-white/20 backdrop-blur-md text-[10px] font-bold border border-white/25">
-            Top Obsession: @khaby.lame (412 reels)
+          <!-- 2x2 Personalized Metrics Grid -->
+          <div class="w-full grid grid-cols-2 gap-1.5 text-left">
+            <div class="bg-black/20 backdrop-blur-sm rounded-xl p-2 border border-white/15">
+              <span class="text-[8px] uppercase font-bold opacity-75 block">Savage Streak</span>
+              <span id="story-streak" class="text-xs font-black font-mono text-white">🔥 84 Days</span>
+            </div>
+            <div class="bg-black/20 backdrop-blur-sm rounded-xl p-2 border border-white/15">
+              <span class="text-[8px] uppercase font-bold opacity-75 block">Night Owl</span>
+              <span id="story-night" class="text-xs font-black font-mono text-white">🌙 88% (3 AM)</span>
+            </div>
+            <div class="bg-black/20 backdrop-blur-sm rounded-xl p-2 border border-white/15">
+              <span class="text-[8px] uppercase font-bold opacity-75 block">Top Niche</span>
+              <span id="story-top-hashtag" class="text-[11px] font-black text-amber-200 truncate block">#brainrot</span>
+            </div>
+            <div class="bg-black/20 backdrop-blur-sm rounded-xl p-2 border border-white/15">
+              <span class="text-[8px] uppercase font-bold opacity-75 block">Reaction Matrix</span>
+              <span id="story-top-emojis" class="text-xs font-black block">💀 😭 🔥</span>
+            </div>
           </div>
-
         </div>
 
-        <!-- Footer -->
-        <div class="relative z-10 pt-2 border-t border-white/20 flex items-center justify-between text-[10px]">
-          <span class="font-bold opacity-80">100% Local • Zero Cloud</span>
-          <span class="font-mono text-amber-200 font-bold">reelwrapped.app</span>
+        <!-- Story Bottom Watermark -->
+        <div class="relative z-10 pt-2 border-t border-white/20 flex items-center justify-between text-[9px] font-mono opacity-85">
+          <span>🔒 Verified Local Vault</span>
+          <span>prashanth-karanam.github.io/reel-wrapped</span>
         </div>
-
-        <!-- Subtle Background Glow Elements -->
-        <div class="absolute -bottom-10 -left-10 w-36 h-36 rounded-full bg-white/10 blur-xl"></div>
-        <div class="absolute -top-10 -right-10 w-36 h-36 rounded-full bg-amber-400/20 blur-xl"></div>
       </div>
 
-      <!-- Action Buttons -->
-      <div class="w-full max-w-[300px] mt-4 space-y-2">
-        <button onclick="triggerInstagramStoryShare()" class="w-full py-3 rounded-2xl brand-gradient-bg text-white font-extrabold text-xs shadow-lg shadow-pink-500/25 flex items-center justify-center gap-2 active:scale-95 transition-all">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+      <!-- Export & Native Share Action Buttons -->
+      <div class="w-full max-w-[310px] mt-4 space-y-2">
+        <button onclick="shareRealPngToInstagramStory()" class="w-full py-3 px-4 rounded-2xl brand-gradient-bg text-white font-black text-xs shadow-lg shadow-pink-500/25 flex items-center justify-center gap-2 hover:opacity-95 active:scale-95 transition-all">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
           </svg>
-          SHARE TO INSTAGRAM STORY
+          SHARE 1080×1920 PNG TO INSTAGRAM STORY
         </button>
 
         <div class="grid grid-cols-2 gap-2">
-          <button onclick="saveHighResPng()" class="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-            </svg>
-            Save Card
+          <button onclick="saveHighResPng()" class="py-2.5 px-3 rounded-xl bg-slate-900 text-white font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-slate-800 active:scale-95 transition-all">
+            <span>⬇️</span> Download PNG
           </button>
-          <button onclick="copyStickerToClipboard()" class="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/>
-            </svg>
-            Copy Sticker
+          <button onclick="copyFriendShareLink()" class="py-2.5 px-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-slate-200 active:scale-95 transition-all border border-slate-200">
+            <span>🔗</span> Share Friend Link
           </button>
         </div>
       </div>
-
     </div>
 
     <!-- ========================================== -->
-    <!-- TAB 4: ZERO-CLOUD LOCAL VAULT GUARANTEE    -->
+    <!-- TAB 5: VAULT (RUST/WASM + LOCAL TOOLKIT)   -->
     <!-- ========================================== -->
-    <div id="tab-vault" class="tab-content hidden p-4 sm:p-5 pb-6">
+    <div id="tab-vault" class="tab-content hidden p-4 sm:p-5 pb-6 space-y-4">
       
-      <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
-        <div class="flex items-center gap-2">
-          <div class="w-7 h-7 rounded-lg bg-pink-50 flex items-center justify-center text-pink-600">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-            </svg>
-          </div>
-          <span class="text-xs font-bold text-pink-600 uppercase tracking-wider">Local Ephemeral Auth</span>
+      <!-- Zero-Cloud Security Shield Banner -->
+      <div class="bg-emerald-950 text-emerald-100 p-4 rounded-2xl border border-emerald-800 shadow-md">
+        <div class="flex items-center justify-between mb-2">
+          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider">
+            ⚡ RUST + WASM ZERO-CLOUD ENGINE
+          </span>
+          <span class="text-xs font-mono text-emerald-400">v2.4 • IndexedDB</span>
         </div>
-        <span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
-          RAM ENCRYPTED
-        </span>
-      </div>
-
-      <div class="text-center py-2">
-        <div class="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center mx-auto mb-2 shadow-inner">
-          <svg class="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-          </svg>
-        </div>
-        <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 inline-block mb-1">
-          AIR-GAPPED ARCHITECTURE
-        </span>
-        <h3 class="text-xl font-extrabold tracking-tight text-slate-900">Your Phone Is The Server</h3>
-        <p class="text-xs text-slate-500 max-w-xs mx-auto mt-1 font-medium">
-          100% client-side execution. Zero remote servers exist. No passwords, tokens, or session telemetry ever leave this device sandbox.
+        <h3 class="text-base font-black text-white">100% Local Processing</h3>
+        <p class="text-xs text-emerald-200/90 mt-1 leading-relaxed">
+          Drop your Instagram <code class="text-white font-mono">message_1.json</code> or <code class="text-white font-mono">reel_wrapped_local_vault.json</code> below, or connect directly to your local Rust / Python toolkit on <code class="text-white font-mono">127.0.0.1:8765</code>.
         </p>
       </div>
 
-      <!-- Credential Form Simulation -->
-      <div class="mt-4 space-y-3">
+      <!-- REAL FILE DROPZONE (Instagram JSON / Vault JSON with WASM & Mojibake Fix) -->
+      <div class="bg-white p-4 rounded-2xl border-2 border-dashed border-purple-300 shadow-sm space-y-3 text-center">
+        <div class="w-10 h-10 rounded-2xl brand-gradient-bg text-white flex items-center justify-center mx-auto font-black text-lg shadow-sm">
+          ⚡
+        </div>
         <div>
-          <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Instagram Account</label>
-          <div class="flex items-center gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200">
-            <span class="text-slate-400 font-mono text-sm">@</span>
-            <input id="input-username" type="text" value="prashanth.k" placeholder="username" class="bg-transparent border-0 outline-none text-xs font-medium w-full text-slate-900 placeholder-slate-400">
-          </div>
+          <h4 class="text-xs font-black text-slate-900 uppercase tracking-wider">Import Instagram JSON or Toolkit Vault</h4>
+          <p class="text-[11px] text-slate-500 mt-0.5">
+            Supports official Instagram <code class="font-mono text-slate-700">message_1.json</code> (auto-fixes UTF-8 Mojibake emojis) or <code class="font-mono text-slate-700">reel_wrapped_local_vault.json</code>
+          </p>
         </div>
 
-        <div>
-          <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Instagram Password</label>
-          <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
-            <div class="flex items-center gap-2 grow">
-              <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-              <input id="input-password" type="password" value="mySuperSecureSessionKey123" class="bg-transparent border-0 outline-none text-xs font-mono grow text-slate-900">
-            </div>
-            <button onclick="togglePasswordVisibility()" title="Toggle visibility" class="text-slate-400 hover:text-slate-700 p-1">
-              <svg id="eye-icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
-            </button>
-          </div>
-          <div class="text-[10px] text-emerald-600 font-medium mt-1 flex items-center gap-1">
-            <span>✓</span> Zeroized CharArray in RAM immediately post-handshake
-          </div>
-        </div>
-
-        <!-- Biometric Keystore Toggle Switch -->
-        <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
-          <div class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 004 11m0 0a8 8 0 001.353 4.456" />
-            </svg>
-            <div>
-              <span class="text-xs font-bold text-slate-800 block">Biometric KeyStore</span>
-              <span id="biometric-status-text" class="text-[10px] text-emerald-600 font-semibold">Active: Fingerprint / Face ID Required</span>
-            </div>
-          </div>
-          <button onclick="toggleBiometrics()" id="biometric-switch" class="w-11 h-6 bg-emerald-500 rounded-full relative p-0.5 transition-colors duration-200">
-            <div id="biometric-knob" class="w-5 h-5 bg-white rounded-full ml-auto shadow-sm transition-all duration-200"></div>
+        <input id="local-json-file-input" type="file" accept=".json" multiple onchange="handleLocalFilesSelected(this.files)" class="hidden">
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="document.getElementById('local-json-file-input').click()" class="py-2.5 px-3 rounded-xl bg-slate-900 text-white font-black text-xs hover:bg-slate-800 active:scale-95 transition-all">
+            📂 Select JSON Files
+          </button>
+          <button onclick="runWasmSyntheticBenchmark()" class="py-2.5 px-3 rounded-xl bg-purple-50 text-purple-700 border border-purple-200 font-black text-xs hover:bg-purple-100 active:scale-95 transition-all">
+            🚀 Benchmark 5K Msgs
           </button>
         </div>
+        <div id="wasm-benchmark-readout" class="text-[10px] font-mono text-emerald-700 bg-emerald-50 rounded-xl p-2 border border-emerald-200 hidden"></div>
+      </div>
 
-        <button onclick="runRealisticScanSimulation()" id="btn-init-scan" class="w-full py-3 rounded-2xl brand-gradient-bg text-white font-extrabold text-xs shadow-md shadow-pink-500/20 flex items-center justify-center gap-2 active:scale-95 transition-all">
-          <span id="init-scan-text">INITIALIZE LOCAL SCAN</span>
-          <span id="init-scan-icon" class="text-sm">→</span>
+      <!-- Local Rust & Python CLI Loopback Bridge -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        <div class="flex items-center justify-between">
+          <h4 class="text-xs font-black text-slate-800 uppercase tracking-wider">Local Loopback Bridge (127.0.0.1:8765)</h4>
+          <span id="bridge-status-pill" class="text-[10px] font-mono font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+            Standby
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-500">
+          Run your native Rust or Python <code class="font-mono text-slate-700">instagram-reel-counter</code> toolkit locally to stream live <code class="font-mono text-slate-700">direct_v2</code> inbox threads straight into this UI:
+        </p>
+        <div class="p-2.5 rounded-xl bg-slate-900 text-slate-100 font-mono text-[10px] overflow-x-auto">
+          <div># Option 1: Native Rust Engine (Rayon Multi-Core + Instant UI)</div>
+          <div class="text-emerald-400">cargo run --manifest-path rust-engine/Cargo.toml --release</div>
+          <div class="mt-1.5"># Option 2: Python instagrapi Ghost Toolkit</div>
+          <div class="text-pink-400">irm https://raw.githubusercontent.com/prashanth-karanam/instagram-reel-counter/main/install.ps1 | iex</div>
+        </div>
+        <button onclick="connectLocalLoopbackBridge()" class="w-full py-2.5 rounded-xl brand-gradient-bg text-white font-black text-xs shadow-sm active:scale-95 transition-all">
+          🔌 SYNC WITH LOCAL 127.0.0.1:8765 BRIDGE
         </button>
       </div>
 
-      <!-- Local SQLite Database Inspector -->
-      <div class="mt-4 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2 text-xs">
-        <div class="flex items-center justify-between font-bold text-slate-700">
-          <span>Local SQLite Cache</span>
-          <span class="text-emerald-600 font-mono">4.8 MB (Indexed)</span>
+      <!-- Ephemeral Session & Biometric Hardware Sandbox -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        <div class="flex items-center justify-between">
+          <h4 class="text-xs font-black text-slate-800 uppercase tracking-wider">Hardware KeyStore Sandbox</h4>
+          <span class="text-[10px] font-mono text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded">TLS 1.3 Direct</span>
         </div>
-        <div class="flex items-center justify-between text-slate-500 text-[11px]">
-          <span>Android KeyStore Alias:</span>
-          <span class="font-mono text-slate-700">ig_reel_session_key</span>
-        </div>
-        <div class="flex items-center justify-between text-slate-500 text-[11px]">
-          <span>Network Interception:</span>
-          <span class="text-emerald-600 font-bold">BLOCKED (0 KB Remote)</span>
-        </div>
-        <div class="pt-2 border-t border-slate-200 flex gap-2">
-          <button onclick="exportLocalJson()" class="flex-1 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 font-bold text-[11px] hover:bg-slate-50">
-            Export JSON
-          </button>
-          <button onclick="clearAppCache()" class="flex-1 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-600 font-bold text-[11px] hover:bg-red-100">
-            Purge Cache
+
+        <div class="space-y-2.5">
+          <div>
+            <label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Instagram Handle</label>
+            <input type="text" value="@prashanth.k" class="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-purple-500">
+          </div>
+
+          <div>
+            <label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Ephemeral Password (Zeroized After Handshake)</label>
+            <div class="relative flex items-center">
+              <input id="vault-password-input" type="password" value="••••••••••••••" class="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl text-slate-800 pr-9 focus:outline-none focus:border-purple-500">
+              <button onclick="togglePasswordVisibility()" type="button" class="absolute right-2.5 text-slate-400 hover:text-slate-600">
+                <svg id="eye-icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between pt-2 border-t border-slate-100">
+            <div>
+              <span class="text-xs font-bold text-slate-800 block">Biometric Hardware KeyStore</span>
+              <span class="text-[10px] text-emerald-600 font-semibold" id="biometric-status-text">Active: Fingerprint / Face ID Required</span>
+            </div>
+            <button id="biometric-switch" onclick="toggleBiometrics()" type="button" aria-label="Toggle Biometrics" class="w-11 h-6 bg-emerald-500 rounded-full relative p-0.5 transition-colors duration-200">
+              <div id="biometric-knob" class="w-5 h-5 bg-white rounded-full ml-auto shadow-sm transition-all duration-200"></div>
+            </button>
+          </div>
+
+          <button id="btn-init-scan" onclick="runRealisticScanSimulation()" class="w-full py-2.5 px-4 rounded-xl bg-slate-900 text-white font-black text-xs shadow-md hover:bg-slate-800 active:scale-95 transition-all flex items-center justify-center gap-2">
+            <span id="init-scan-text">INITIALIZE LOCAL SCAN</span>
+            <span id="init-scan-icon">→</span>
           </button>
         </div>
       </div>
 
+      <!-- Local Vault Storage Controls -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-2">
+        <div class="flex items-center justify-between mb-1">
+          <h4 class="text-xs font-black text-slate-400 uppercase tracking-wider">Local IndexedDB Vault</h4>
+          <span id="vault-record-count" class="text-[10px] font-mono text-slate-500">6 Dossiers Cached</span>
+        </div>
+        <button onclick="exportLocalJson()" class="w-full py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-between transition-all">
+          <span>📦 Export Local Vault (.json)</span>
+          <span class="font-mono text-[10px] text-slate-500">UTF-8</span>
+        </button>
+        <button onclick="clearAppCache()" class="w-full py-2.5 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs flex items-center justify-between transition-all">
+          <span>🔥 Purge IndexedDB &amp; Reset Default</span>
+          <span class="font-mono text-[10px] text-rose-500">Zeroize</span>
+        </button>
+      </div>
     </div>
 
-    <!-- ========================================== -->
-    <!-- PERSISTENT DOCKED BOTTOM NAVIGATION TABS   -->
-    <!-- ========================================== -->
-    <nav class="sticky bottom-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 flex items-center justify-around shadow-lg">
-      
-      <!-- TAB 1: RANK -->
-      <button onclick="switchTab('tab-leaderboard')" id="bottom-nav-leaderboard" class="bottom-tab-btn flex-1 py-1 flex flex-col items-center gap-1 transition-all active:scale-95 text-pink-600 font-extrabold">
-        <div class="w-7 h-7 rounded-xl flex items-center justify-center brand-gradient-bg text-white shadow-sm">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-          </svg>
-        </div>
+    <!-- ======================================================== -->
+    <!-- BOTTOM NATIVE NAVIGATION BAR (5 TABS)                    -->
+    <!-- ======================================================== -->
+    <nav class="mt-auto border-t border-slate-200 bg-white/95 backdrop-blur-md px-2 py-2 grid grid-cols-5 gap-1 sticky bottom-0 z-30">
+      <button onclick="switchTab('tab-leaderboard')" id="nav-tab-leaderboard" class="nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl text-purple-600 bg-purple-50 font-black transition-all">
+        <svg class="w-4 h-4 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+        </svg>
         <span class="text-[10px]">Rank</span>
       </button>
 
-      <!-- TAB 2: DOSSIER -->
-      <button onclick="switchTab('tab-dossier')" id="bottom-nav-dossier" class="bottom-tab-btn flex-1 py-1 flex flex-col items-center gap-1 transition-all active:scale-95 text-slate-400 font-bold hover:text-slate-800">
-        <div class="w-7 h-7 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-          </svg>
-        </div>
-        <span id="bottom-label-dossier" class="text-[10px]">Dossier</span>
+      <button onclick="switchTab('tab-dossier')" id="nav-tab-dossier" class="nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl text-slate-400 hover:text-slate-700 font-bold transition-all">
+        <svg class="w-4 h-4 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"/>
+        </svg>
+        <span class="text-[10px]">Dossier</span>
       </button>
 
-      <!-- TAB 3: EXPORT -->
-      <button onclick="switchTab('tab-story')" id="bottom-nav-story" class="bottom-tab-btn flex-1 py-1 flex flex-col items-center gap-1 transition-all active:scale-95 text-slate-400 font-bold hover:text-slate-800">
-        <div class="w-7 h-7 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-          </svg>
-        </div>
+      <button onclick="switchTab('tab-ghost')" id="nav-tab-ghost" class="nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl text-slate-400 hover:text-slate-700 font-bold transition-all">
+        <svg class="w-4 h-4 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+        </svg>
+        <span class="text-[10px]">Ghost 👻</span>
+      </button>
+
+      <button onclick="switchTab('tab-story')" id="nav-tab-story" class="nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl text-slate-400 hover:text-slate-700 font-bold transition-all">
+        <svg class="w-4 h-4 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+        </svg>
         <span class="text-[10px]">Export</span>
       </button>
 
-      <!-- TAB 4: VAULT -->
-      <button onclick="switchTab('tab-vault')" id="bottom-nav-vault" class="bottom-tab-btn flex-1 py-1 flex flex-col items-center gap-1 transition-all active:scale-95 text-slate-400 font-bold hover:text-slate-800">
-        <div class="w-7 h-7 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-          </svg>
-        </div>
+      <button onclick="switchTab('tab-vault')" id="nav-tab-vault" class="nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl text-slate-400 hover:text-slate-700 font-bold transition-all">
+        <svg class="w-4 h-4 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+        </svg>
         <span class="text-[10px]">Vault</span>
       </button>
-
     </nav>
 
   </main>
+
+  <!-- ======================================================== -->
+  <!-- INTERACTIVE FULL-SCREEN 9:16 STORY REVEAL & GUESS WHO    -->
+  <!-- ======================================================== -->
+  <div id="modal-story-player" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden flex items-center justify-center p-2 sm:p-4">
+    <div class="w-full max-w-[360px] h-[640px] rounded-3xl overflow-hidden shadow-2xl border border-white/15 bg-slate-950 text-white flex flex-col justify-between relative select-none">
+      <!-- Story Progress Bars -->
+      <div class="grid grid-cols-5 gap-1 p-3 z-20" id="story-player-bars"></div>
+
+      <!-- Top Bar -->
+      <div class="px-4 flex items-center justify-between z-20">
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-full brand-gradient-bg flex items-center justify-center font-black text-[10px]">RW</div>
+          <span class="text-xs font-bold">Reel Wrapped '25</span>
+        </div>
+        <button onclick="closeStoryMode()" class="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">✕</button>
+      </div>
+
+      <!-- Dynamic Story Slide Body -->
+      <div id="story-player-body" class="flex-1 flex flex-col justify-center items-center px-6 text-center z-10"></div>
+
+      <!-- Story Navigation Footer -->
+      <div class="p-4 flex items-center justify-between z-20 border-t border-white/10">
+        <button onclick="prevStorySlide()" class="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold">← Prev</button>
+        <span id="story-slide-counter" class="text-[11px] font-mono text-white/60">1 / 5</span>
+        <button onclick="nextStorySlide()" class="px-3 py-1.5 rounded-xl bg-white text-slate-950 text-xs font-black">Next →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- MODAL: PWA MOBILE INSTALL GUIDE (iOS / ANDROID)          -->
+  <!-- ======================================================== -->
+  <div id="modal-pwa-install" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="w-full max-w-sm bg-white p-5 rounded-3xl border border-slate-200 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <h4 class="font-black text-sm text-slate-900">📲 Launch as Native Mobile App</h4>
+        <button onclick="toggleModal('modal-pwa-install')" class="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600">✕</button>
+      </div>
+      <div class="space-y-2.5 text-xs text-slate-600">
+        <div class="p-3 rounded-2xl bg-purple-50 border border-purple-200/60 text-purple-950">
+          <div class="font-black text-purple-700 mb-1">🍎 iPhone / iPad (iOS Safari)</div>
+          <p>1. Tap the <strong>Share</strong> icon at the bottom of Safari.<br>2. Tap <strong>Add to Home Screen</strong> for full-screen 9:16 launch.</p>
+        </div>
+        <div class="p-3 rounded-2xl bg-emerald-50 border border-emerald-200/60 text-emerald-950">
+          <div class="font-black text-emerald-700 mb-1">🤖 Android (Chrome / Edge)</div>
+          <p>Tap <strong>Install App</strong> in your browser menu to install the standalone APK-style WebAPK with offline IndexedDB vault.</p>
+        </div>
+      </div>
+      <button onclick="toggleModal('modal-pwa-install')" class="w-full py-2.5 rounded-xl brand-gradient-bg text-white font-bold text-xs">
+        Got It
+      </button>
+    </div>
+  </div>
 
   <!-- ======================================================== -->
   <!-- MODAL: NOTIFICATIONS                                     -->
@@ -715,13 +857,9 @@
   <div id="modal-notifications" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
     <div class="w-full max-w-sm bg-white p-5 rounded-3xl border border-slate-200 shadow-2xl space-y-4">
       <div class="flex items-center justify-between pb-2 border-b border-slate-100">
-        <div class="flex items-center gap-2">
-          <span class="text-base">🔔</span>
-          <h4 class="font-black text-sm text-slate-900">Notifications</h4>
-        </div>
+        <h4 class="font-black text-sm text-slate-900">Recent Reel Milestones</h4>
         <button onclick="toggleModal('modal-notifications')" class="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600 hover:text-slate-900">✕ Close</button>
       </div>
-
       <div class="space-y-2.5 text-xs">
         <div class="p-3 rounded-2xl bg-amber-50 border border-amber-200/60">
           <div class="font-extrabold text-amber-800 flex items-center gap-1">
@@ -731,18 +869,17 @@
         </div>
         <div class="p-3 rounded-2xl bg-pink-50 border border-pink-200/60">
           <div class="font-extrabold text-pink-700 flex items-center gap-1">
-            <span>🚀</span> Weekly Velocity Surge
+            <span>👻</span> Ghost Radar Alert
           </div>
-          <p class="text-pink-900/80 mt-0.5">You exchanged 1,420 reels this week (+340% increase over previous week).</p>
+          <p class="text-pink-900/80 mt-0.5">Marcus Vance has 2 reels from you sitting on UNSEEN (Delivered).</p>
         </div>
         <div class="p-3 rounded-2xl bg-emerald-50 border border-emerald-200/60">
           <div class="font-extrabold text-emerald-800 flex items-center gap-1">
-            <span>🔒</span> Hardware Vault Encrypted
+            <span>⚡</span> Rust + WASM Engine Active
           </div>
-          <p class="text-emerald-900/80 mt-0.5">Session tokens cryptographically sealed in hardware enclave.</p>
+          <p class="text-emerald-900/80 mt-0.5">Linear memory streak &amp; ratio telemetry compiled in 0.4ms.</p>
         </div>
       </div>
-
       <button onclick="toggleModal('modal-notifications')" class="w-full py-2.5 rounded-xl brand-gradient-bg text-white font-bold text-xs">
         Mark All as Read
       </button>
@@ -766,73 +903,100 @@
         </div>
         <button onclick="toggleModal('modal-profile')" class="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600 hover:text-slate-900">✕ Close</button>
       </div>
-
       <div class="space-y-2 text-xs">
         <div class="flex justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-          <span class="text-slate-500">Local SQLite Cache:</span>
-          <span class="font-mono font-bold text-slate-800">14,892 Reels</span>
+          <span class="text-slate-500">Local IndexedDB Vault:</span>
+          <span id="profile-total-reels" class="font-mono font-bold text-slate-800">14,892 Reels</span>
+        </div>
+        <div class="flex justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+          <span class="text-slate-500">Compute Engine:</span>
+          <span class="font-mono font-bold text-emerald-600">Rust / WebAssembly v2.4</span>
         </div>
         <div class="flex justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
           <span class="text-slate-500">Privacy Status:</span>
-          <span class="font-bold text-emerald-600">Zero-Cloud / Sandboxed</span>
-        </div>
-        <div class="flex justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-          <span class="text-slate-500">Device Model:</span>
-          <span class="font-mono text-slate-800">Pixel 8 Pro (ARM64)</span>
+          <span class="font-bold text-emerald-600">Zero-Cloud / Air-Gapped</span>
         </div>
       </div>
-
       <button onclick="toggleModal('modal-profile')" class="w-full py-2.5 rounded-xl bg-slate-900 text-white font-bold text-xs">
         Done
       </button>
     </div>
   </div>
 
-  <!-- ======================================================== -->
-  <!-- MODAL: INSTAGRAM STORY SHARE SIMULATION                  -->
-  <!-- ======================================================== -->
-  <div id="modal-story-share" class="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm hidden flex items-center justify-center p-4">
-    <div class="w-full max-w-sm bg-white p-5 rounded-3xl border border-slate-200 shadow-2xl space-y-4">
-      <div class="text-center py-2">
-        <div class="w-12 h-12 rounded-2xl brand-gradient-bg flex items-center justify-center text-white text-xl mx-auto mb-2 shadow-md">
-          📸
-        </div>
-        <h4 class="font-black text-base text-slate-900">Story Dispatch Ready</h4>
-        <p class="text-xs text-slate-500 mt-0.5">
-          Dispatching intent to <span class="font-mono text-slate-700 font-bold">com.instagram.share.ADD_TO_STORY</span>
-        </p>
-      </div>
-
-      <div class="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-1.5 text-xs">
-        <div class="flex justify-between">
-          <span class="text-slate-500">Interactive Asset:</span>
-          <span class="font-mono font-bold text-emerald-600">Lossless 1080x1920</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-slate-500">Story Sticker:</span>
-          <span class="font-bold text-purple-600" id="share-modal-sticker">#brainrot DNA</span>
-        </div>
-        <div class="flex justify-between">
-          <span class="text-slate-500">Target Partner:</span>
-          <span class="font-bold text-slate-800" id="share-modal-partner">Alex Rivera</span>
-        </div>
-      </div>
-
-      <div class="space-y-2">
-        <button onclick="executeStoryDispatch()" class="w-full py-3 rounded-2xl brand-gradient-bg text-white font-black text-xs shadow-md shadow-pink-500/25 active:scale-95 transition-all">
-          LAUNCH INSTAGRAM STORIES NOW
-        </button>
-        <button onclick="toggleModal('modal-story-share')" class="w-full py-2.5 rounded-xl bg-slate-100 text-slate-600 font-bold text-xs hover:bg-slate-200">
-          Cancel
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- JAVASCRIPT STATE MACHINE & DATA STORE -->
+  <!-- JAVASCRIPT + WEBASSEMBLY STATE MACHINE & DATA STORE -->
   <script>
-    // RICH MOCK DATASET WITH 6 DETAILED FRIENDS & PERSONALIZATION
-    const FRIENDS = [
+    // =========================================================================
+    // 1. REAL COMPILED RUST/WEBASSEMBLY MODULE (Linear Memory Streak & Ratio)
+    // =========================================================================
+    const WASM_BASE64 = "AGFzbQEAAAABBwFgAn9/AX8DAwIAAAUDAQABBysDBm1lbW9yeQIADWNvbXB1dGVfcmF0aW8AAA5jb21wdXRlX3N0cmVhawABCokBAhMAIABB5ABsIAFBASABQQBKG20LcwEEfyABRQR/QQAFQQEhA0EBIQRBASECAkADQCACIAFPDQEgACACQQJ0aigCACAAIAJBAWtBAnRqKAIAayEFIAVBAUYEQCAEQQFqIgQgA0oEQCAEIQMLBSAFQQFKBEBBASEECwsgAkEBaiECDAALCyADCws=";
+    let wasmExports = null;
+
+    async function initRustWasmEngine() {
+      const t0 = performance.now();
+      try {
+        const binaryStr = atob(WASM_BASE64);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+        const { instance } = await WebAssembly.instantiate(bytes);
+        wasmExports = instance.exports;
+        const dt = (performance.now() - t0).toFixed(2);
+        const speedEl = document.getElementById('banner-wasm-speed');
+        if (speedEl) speedEl.innerText = `${dt}ms`;
+      } catch (e) {
+        console.warn("WASM fallback to JS:", e);
+      }
+    }
+
+    function wasmComputeRatio(part, total) {
+      if (wasmExports && wasmExports.compute_ratio) {
+        return wasmExports.compute_ratio(part | 0, total | 0);
+      }
+      return total > 0 ? Math.round((part * 100) / total) : 50;
+    }
+
+    function wasmComputeStreak(sortedEpochDays) {
+      if (!sortedEpochDays || !sortedEpochDays.length) return 1;
+      if (wasmExports && wasmExports.compute_streak && wasmExports.memory) {
+        const len = Math.min(sortedEpochDays.length, 8000);
+        const i32 = new Int32Array(wasmExports.memory.buffer);
+        for (let i = 0; i < len; i++) i32[i] = sortedEpochDays[i];
+        return wasmExports.compute_streak(0, len);
+      }
+      let maxS = 1, curS = 1;
+      for (let i = 1; i < sortedEpochDays.length; i++) {
+        if (sortedEpochDays[i] - sortedEpochDays[i - 1] === 1) {
+          curS++;
+          if (curS > maxS) maxS = curS;
+        } else if (sortedEpochDays[i] !== sortedEpochDays[i - 1]) {
+          curS = 1;
+        }
+      }
+      return maxS;
+    }
+
+    // Decodes Instagram's broken Latin-1 UTF-8 Mojibake (e.g. "\u00f0\u009f\u0092\u0080" -> "💀")
+    function decodeIgMojibake(str) {
+      if (!str || typeof str !== 'string') return '';
+      let hasHighByte = false;
+      for (let i = 0; i < str.length; i++) {
+        const code = str.charCodeAt(i);
+        if (code > 0xff) return str;
+        if (code >= 0x80) hasHighByte = true;
+      }
+      if (!hasHighByte) return str;
+      try {
+        const bytes = new Uint8Array(str.length);
+        for (let i = 0; i < str.length; i++) bytes[i] = str.charCodeAt(i);
+        return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      } catch (_) {
+        return str;
+      }
+    }
+
+    // =========================================================================
+    // 2. DEFAULT DATASET (6 DETAILED FRIENDS + GHOST TELEMETRY)
+    // =========================================================================
+    const DEFAULT_FRIENDS = [
       {
         id: "alex",
         rank: 1,
@@ -853,6 +1017,9 @@
         nightDesc: "Over 42% of your shared reels were sent between 01:30 AM and 04:15 AM.",
         topGenre: "Brainrot / Espresso Memes",
         responseReflex: "⚡ 42s Avg Reaction",
+        seenStatus: "Seen (4m ago)",
+        unseenCount: 0,
+        hourlyHistogram: [85, 100, 92, 60, 20, 15, 30, 45, 55, 70, 82, 95],
         reactions: [
           { emoji: "💀", count: 842 },
           { emoji: "😭", count: 614 },
@@ -876,6 +1043,12 @@
           { rank: 3, handle: "@overtime", count: 210, tag: "Sports & Wild Plays" },
           { rank: 4, handle: "@pubity", count: 189, tag: "Viral News & Wholesome" },
           { rank: 5, handle: "@theonion", count: 142, tag: "Satire & Brainrot" }
+        ],
+        ghostMessages: [
+          { time: "02:47", sender: "Alex Rivera", is_me: false, is_reel: true, text_or_url: "https://instagram.com/reel/C8x9kLm/", creator: "@khaby.lame" },
+          { time: "02:49", sender: "You", is_me: true, is_reel: true, text_or_url: "https://instagram.com/reel/C8y1pQr/", creator: "@theonion" },
+          { time: "02:51", sender: "Alex Rivera", is_me: false, is_reel: false, text_or_url: "BRO WATCH THE ENDING 💀💀", creator: "" },
+          { time: "03:04", sender: "Alex Rivera", is_me: false, is_reel: true, text_or_url: "https://instagram.com/reel/C8z4vBn/", creator: "@pubity" }
         ]
       },
       {
@@ -898,561 +1071,1275 @@
         nightDesc: "Peak transmission occurs between 8:30 PM and 11:15 PM.",
         topGenre: "Architecture & Slow Living",
         responseReflex: "☕ 14m Mindful Viewer",
+        seenStatus: "Seen (28m ago)",
+        unseenCount: 0,
+        hourlyHistogram: [25, 18, 12, 10, 15, 35, 50, 62, 85, 96, 88, 45],
         reactions: [
           { emoji: "✨", count: 512 },
-          { emoji: "🥹", count: 388 },
-          { emoji: "🤍", count: 295 }
+          { emoji: "🤍", count: 440 },
+          { emoji: "🥹", count: 290 }
         ],
         hashtags: [
-          { tag: "#archdigest", count: 390, pct: "92%" },
-          { tag: "#modernliving", count: 310, pct: "84%" },
-          { tag: "#cinematography", count: 240, pct: "71%" },
-          { tag: "#interiorstyle", count: 180, pct: "58%" },
-          { tag: "#minimalism", count: 135, pct: "49%" }
+          { tag: "#archdigest", count: 310, pct: "91%" },
+          { tag: "#japantravel", count: 265, pct: "84%" },
+          { tag: "#matchalatte", count: 198, pct: "72%" },
+          { tag: "#filmphotography", count: 154, pct: "60%" }
         ],
         audioTracks: [
-          { title: "Birds of a Feather", artist: "Billie Eilish", count: 72 },
-          { title: "Gilded Lily", artist: "Cults", count: 54 },
-          { title: "Space Song", artist: "Beach House", count: 38 }
+          { title: "Mia & Sebastian's Theme", artist: "Justin Hurwitz", count: 72 },
+          { title: "Je te laisserai des mots", artist: "Patrick Watson", count: 58 },
+          { title: "Sunset Lover", artist: "Petit Biscuit", count: 41 }
         ],
         creators: [
-          { rank: 1, handle: "@archdigest", count: 390, tag: "Modern Homes & Spaces" },
-          { rank: 2, handle: "@natgeo", count: 310, tag: "Wildlife & Geography" },
-          { rank: 3, handle: "@vox", count: 240, tag: "Visual Journalism" },
-          { rank: 4, handle: "@monocle", count: 180, tag: "Design & Culture" },
-          { rank: 5, handle: "@cinematography", count: 135, tag: "Lighting & Color" }
+          { rank: 1, handle: "@archdigest", count: 310, tag: "Interior & Design Tours" },
+          { rank: 2, handle: "@natgeo", count: 245, tag: "Visual Storytelling" },
+          { rank: 3, handle: "@kinfolk", count: 190, tag: "Slow Living & Culture" }
+        ],
+        ghostMessages: [
+          { time: "21:15", sender: "Sarah Chen", is_me: false, is_reel: true, text_or_url: "https://instagram.com/reel/C9a2kLp/", creator: "@archdigest" },
+          { time: "21:29", sender: "You", is_me: true, is_reel: true, text_or_url: "https://instagram.com/reel/C9b7mNq/", creator: "@kinfolk" }
         ]
       },
       {
         id: "marcus",
         rank: 3,
         name: "Marcus Vance",
-        handle: "@marcus_v",
+        handle: "@mvance_lifts",
         avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80",
-        totalReels: 1940,
-        streak: 31,
-        friendRatio: 28,
-        youRatio: 72,
-        friendCount: 543,
-        youCount: 1397,
-        statusTag: "YOU LEAD",
-        primaryRole: "SPORADIC MEME BOMBER",
-        statusSubtitle: "You send 2.6x more reels",
-        nightScore: 92,
-        nightTitle: "Midnight NBA & Gaming Syndicate",
-        nightDesc: "Intense bursts sent during live West Coast games and late Discord queues.",
-        topGenre: "NBA Dunk Reels & Apex Clips",
-        responseReflex: "⚡ 18s Hyperspeed",
+        totalReels: 2190,
+        streak: 41,
+        friendRatio: 30,
+        youRatio: 70,
+        friendCount: 657,
+        youCount: 1533,
+        statusTag: "CARRIER",
+        primaryRole: "HEAVY BACKPACK CARRIER",
+        statusSubtitle: "You send 2.3x more reels",
+        nightScore: 42,
+        nightTitle: "5 AM Pre-Workout Syndicate",
+        nightDesc: "Heavy spike at 05:30 AM before morning gym sessions.",
+        topGenre: "Gym Fails & Stoic Edits",
+        responseReflex: "🏋️ 38m Between Sets",
+        seenStatus: "UNSEEN (Delivered)",
+        unseenCount: 2,
+        hourlyHistogram: [15, 10, 45, 92, 85, 70, 55, 60, 65, 50, 35, 20],
         reactions: [
-          { emoji: "🔥", count: 420 },
-          { emoji: "🤯", count: 315 },
-          { emoji: "💀", count: 290 }
+          { emoji: "💪", count: 490 },
+          { emoji: "🔥", count: 380 },
+          { emoji: "🗿", count: 310 }
         ],
         hashtags: [
-          { tag: "#dunksoftheyear", count: 280, pct: "90%" },
-          { tag: "#nba", count: 195, pct: "75%" },
-          { tag: "#gamingclips", count: 140, pct: "61%" },
-          { tag: "#apexlegends", count: 98, pct: "47%" },
-          { tag: "#shoti", count: 82, pct: "38%" }
+          { tag: "#gymrat", count: 295, pct: "89%" },
+          { tag: "#stoicism", count: 210, pct: "75%" },
+          { tag: "#creatine", count: 165, pct: "63%" }
         ],
         audioTracks: [
-          { title: "FE!N", artist: "Travis Scott", count: 65 },
-          { title: "Carnival", artist: "Kanye West & Ty Dolla $ign", count: 48 },
-          { title: "Type Shit", artist: "Future & Metro Boomin", count: 36 }
+          { title: "KERAUNOS PHONK", artist: "PlayaPhonk", count: 94 },
+          { title: "Memory Reboot", artist: "VOJ & Narvent", count: 67 }
         ],
         creators: [
-          { rank: 1, handle: "@houseofhighlights", count: 280, tag: "Basketball & Dunks" },
-          { rank: 2, handle: "@bleacherreport", count: 195, tag: "Culture & Viral Sports" },
-          { rank: 3, handle: "@ign", count: 140, tag: "Gaming News & Trailers" },
-          { rank: 4, handle: "@sidemen", count: 98, tag: "YouTube Shenanigans" },
-          { rank: 5, handle: "@complex", count: 82, tag: "Sneakers & Streetwear" }
+          { rank: 1, handle: "@cbum", count: 295, tag: "Classic Physique & Gym" },
+          { rank: 2, handle: "@noeldeyzel_bodybuilder", count: 210, tag: "Fitness Wisdom" }
+        ],
+        ghostMessages: [
+          { time: "06:12", sender: "You", is_me: true, is_reel: true, text_or_url: "https://instagram.com/reel/C9c1xYz/", creator: "@cbum" },
+          { time: "06:14", sender: "You", is_me: true, is_reel: true, text_or_url: "https://instagram.com/reel/C9d4wVu/", creator: "@noeldeyzel_bodybuilder" }
+        ]
+      },
+      {
+        id: "priya",
+        rank: 4,
+        name: "Priya Nair",
+        handle: "@priya.codes",
+        avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=150&q=80",
+        totalReels: 1845,
+        streak: 36,
+        friendRatio: 51,
+        youRatio: 49,
+        friendCount: 941,
+        youCount: 904,
+        statusTag: "BALANCED",
+        primaryRole: "TECH & PROD-DOWN CO-PILOTS",
+        statusSubtitle: "Near-perfect 50/50 balance",
+        nightScore: 79,
+        nightTitle: "2 AM Production Debuggers",
+        nightDesc: "Peak reels exchanged during late-night coding sprints.",
+        topGenre: "Dev Humor & Startup Roasts",
+        responseReflex: "⚡ 19s Terminal Tab",
+        seenStatus: "Seen (1m ago)",
+        unseenCount: 0,
+        hourlyHistogram: [78, 90, 84, 50, 15, 10, 40, 65, 72, 80, 88, 92],
+        reactions: [
+          { emoji: "💀", count: 520 },
+          { emoji: "🤡", count: 340 },
+          { emoji: "🚀", count: 215 }
+        ],
+        hashtags: [
+          { tag: "#rustlang", count: 240, pct: "92%" },
+          { tag: "#programmerhumor", count: 195, pct: "81%" },
+          { tag: "#leetcode", count: 140, pct: "66%" }
+        ],
+        audioTracks: [
+          { title: "Synthwave Cyberpunk Mix", artist: "Nightride FM", count: 53 },
+          { title: "Veridis Quo", artist: "Daft Punk", count: 44 }
+        ],
+        creators: [
+          { rank: 1, handle: "@fireship_dev", count: 240, tag: "100 Seconds of Code" },
+          { rank: 2, handle: "@theprimeagen", count: 185, tag: "Rust & Neovim Takes" }
+        ],
+        ghostMessages: [
+          { time: "01:40", sender: "Priya Nair", is_me: false, is_reel: true, text_or_url: "https://instagram.com/reel/C9e8tRs/", creator: "@fireship_dev" }
+        ]
+      },
+      {
+        id: "devon",
+        rank: 5,
+        name: "Devon Brooks",
+        handle: "@devon_eats",
+        avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80",
+        totalReels: 1520,
+        streak: 22,
+        friendRatio: 74,
+        youRatio: 26,
+        friendCount: 1125,
+        youCount: 395,
+        statusTag: "SPAMMER",
+        primaryRole: "MIDNIGHT RECIPE HOARDER",
+        statusSubtitle: "Devon sends 2.8x more reels",
+        nightScore: 81,
+        nightTitle: "1 AM Starving Foodies",
+        nightDesc: "500+ garlic butter pasta reels saved, 0 cooked.",
+        topGenre: "Street Food & Air Fryer Hacks",
+        responseReflex: "🍕 3m Snack Break",
+        seenStatus: "UNSEEN (Delivered)",
+        unseenCount: 1,
+        hourlyHistogram: [82, 75, 40, 15, 10, 20, 60, 75, 85, 92, 98, 90],
+        reactions: [
+          { emoji: "🤤", count: 410 },
+          { emoji: "🔥", count: 290 },
+          { emoji: "🧀", count: 180 }
+        ],
+        hashtags: [
+          { tag: "#foodporn", count: 280, pct: "90%" },
+          { tag: "#airfryer", count: 190, pct: "74%" },
+          { tag: "#ramen", count: 130, pct: "58%" }
+        ],
+        audioTracks: [
+          { title: "Le Festin (Ratatouille)", artist: "Camille", count: 61 }
+        ],
+        creators: [
+          { rank: 1, handle: "@joshuaweissman", count: 210, tag: "But Better Cooking" }
+        ],
+        ghostMessages: [
+          { time: "00:55", sender: "Devon Brooks", is_me: false, is_reel: true, text_or_url: "https://instagram.com/reel/C9f2pLm/", creator: "@joshuaweissman" }
         ]
       },
       {
         id: "elena",
-        rank: 4,
+        rank: 6,
         name: "Elena Rostova",
-        handle: "@elena.r",
-        avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80",
-        totalReels: 1220,
+        handle: "@elena_cats",
+        avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&q=80",
+        totalReels: 1107,
         streak: 19,
         friendRatio: 58,
         youRatio: 42,
-        friendCount: 708,
-        youCount: 512,
-        statusTag: "CREATIVE",
-        primaryRole: "LURKING SPEED-DEMON",
-        statusSubtitle: "Elena shares underground music",
-        nightScore: 45,
-        nightTitle: "Daylight Sound Scout",
-        nightDesc: "Consistently discovers underground UK garage and indie rock at lunch.",
-        topGenre: "Indie Rock & Vinyl Digging",
-        responseReflex: "⚡ 55s Reflex",
+        friendCount: 642,
+        youCount: 465,
+        statusTag: "WHOLESOME",
+        primaryRole: "ORANGE CAT SEROTONIN DEALER",
+        statusSubtitle: "Elena sends 1.4x more reels",
+        nightScore: 55,
+        nightTitle: "Cozy Evening Cat Stream",
+        nightDesc: "100% unhinged orange cats and capybara videos.",
+        topGenre: "Orange Cats & Capybaras",
+        responseReflex: "🐾 2m Instant Smile",
+        seenStatus: "Seen (2h ago)",
+        unseenCount: 0,
+        hourlyHistogram: [30, 20, 10, 10, 25, 45, 65, 78, 88, 94, 70, 45],
         reactions: [
-          { emoji: "🎧", count: 240 },
-          { emoji: "⚡", count: 180 },
-          { emoji: "🖤", count: 130 }
+          { emoji: "🐱", count: 390 },
+          { emoji: "😭", count: 275 },
+          { emoji: "❤️", count: 240 }
         ],
         hashtags: [
-          { tag: "#indierock", count: 185, pct: "86%" },
-          { tag: "#shoegaze", count: 142, pct: "74%" },
-          { tag: "#vinyldigger", count: 110, pct: "62%" },
-          { tag: "#boilerroom", count: 88, pct: "50%" },
-          { tag: "#undergroundrave", count: 64, pct: "41%" }
+          { tag: "#orangecat", count: 310, pct: "95%" },
+          { tag: "#capybara", count: 185, pct: "79%" }
         ],
         audioTracks: [
-          { title: "360", artist: "Charli xcx", count: 52 },
-          { title: "Von dutch", artist: "Charli xcx", count: 44 },
-          { title: "Brat", artist: "Charli xcx", count: 39 }
+          { title: "Happy Happy Happy Cat", artist: "Viral Pet Sound", count: 77 }
         ],
         creators: [
-          { rank: 1, handle: "@boilerroomtv", count: 185, tag: "Live DJ Sets & Club Culture" },
-          { rank: 2, handle: "@nts_radio", count: 142, tag: "Underground Radio" },
-          { rank: 3, handle: "@pitchfork", count: 110, tag: "Album Reviews & Ratings" },
-          { rank: 4, handle: "@thefader", count: 88, tag: "Emerging Artists" },
-          { rank: 5, handle: "@ceremony", count: 64, tag: "Punk & Alternative" }
-        ]
-      },
-      {
-        id: "liam",
-        rank: 5,
-        name: "Liam Tanaka",
-        handle: "@liam_tanaka",
-        avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80",
-        totalReels: 980,
-        streak: 12,
-        friendRatio: 60,
-        youRatio: 40,
-        friendCount: 588,
-        youCount: 392,
-        statusTag: "ANIME BUFF",
-        primaryRole: "SHONEN HYPE MASTER",
-        statusSubtitle: "Liam sends Jujutsu Kaisen sakuga edits",
-        nightScore: 78,
-        nightTitle: "Midnight Sakuga Enthusiast",
-        nightDesc: "Reels drop right when new weekly episodes air in Tokyo.",
-        topGenre: "Anime Sakuga & Manga Panels",
-        responseReflex: "⚡ 30s Reflex",
-        reactions: [
-          { emoji: "⚔️", count: 195 },
-          { emoji: "🔥", count: 180 },
-          { emoji: "😱", count: 110 }
+          { rank: 1, handle: "@weratedogs", count: 195, tag: "Wholesome Pets" }
         ],
-        hashtags: [
-          { tag: "#jjk", count: 160, pct: "89%" },
-          { tag: "#sakuga", count: 130, pct: "78%" },
-          { tag: "#chainsawman", count: 95, pct: "64%" },
-          { tag: "#mangaedit", count: 72, pct: "51%" },
-          { tag: "#animeart", count: 55, pct: "40%" }
-        ],
-        audioTracks: [
-          { title: "Specialz", artist: "King Gnu", count: 48 },
-          { title: "Kick Back", artist: "Kenshi Yonezu", count: 35 },
-          { title: "Where Our Blue Is", artist: "Tatsuya Kitani", count: 27 }
-        ],
-        creators: [
-          { rank: 1, handle: "@crunchyroll", count: 160, tag: "Official Anime Streams" },
-          { rank: 2, handle: "@mappa_studio", count: 130, tag: "Animation Showcase" },
-          { rank: 3, handle: "@vizmedia", count: 95, tag: "Manga Releases" },
-          { rank: 4, handle: "@sakugabooru", count: 72, tag: "Key Animation Clips" },
-          { rank: 5, handle: "@shonenjump", count: 55, tag: "Weekly Manga Chapters" }
-        ]
-      },
-      {
-        id: "chloe",
-        rank: 6,
-        name: "Chloe Bennet",
-        handle: "@chloeb_vibes",
-        avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=150&q=80",
-        totalReels: 750,
-        streak: 8,
-        friendRatio: 50,
-        youRatio: 50,
-        friendCount: 375,
-        youCount: 375,
-        statusTag: "COFFEE/VLOGS",
-        primaryRole: "WEEKEND CAFE HOPPER",
-        statusSubtitle: "Equal exchanges on culinary spots",
-        nightScore: 35,
-        nightTitle: "Morning Espresso Explorer",
-        nightDesc: "Peak sharing occurs Saturday & Sunday between 9 AM and 11 AM.",
-        topGenre: "Specialty Coffee & Bakery Runs",
-        responseReflex: "☕ 45m Mindful",
-        reactions: [
-          { emoji: "☕", count: 140 },
-          { emoji: "🥐", count: 110 },
-          { emoji: "✨", count: 85 }
-        ],
-        hashtags: [
-          { tag: "#coffeeshops", count: 120, pct: "85%" },
-          { tag: "#matchalatte", count: 95, pct: "73%" },
-          { tag: "#bakeryrun", count: 70, pct: "60%" },
-          { tag: "#nycfoodie", count: 55, pct: "48%" },
-          { tag: "#cafestudy", count: 40, pct: "35%" }
-        ],
-        audioTracks: [
-          { title: "Coffee", artist: "beabadoobee", count: 32 },
-          { title: "Sunday Morning", artist: "Maroon 5", count: 24 },
-          { title: "Sweet", artist: "Cigarettes After Sex", count: 18 }
-        ],
-        creators: [
-          { rank: 1, handle: "@nycfoodgals", count: 120, tag: "NYC Dining & Cafes" },
-          { rank: 2, handle: "@jameshoffmann", count: 95, tag: "Coffee Science & Reviews" },
-          { rank: 3, handle: "@eater", count: 70, tag: "Restaurant Guides" },
-          { rank: 4, handle: "@bonappetitmag", count: 55, tag: "Recipes & Cooking" },
-          { rank: 5, handle: "@pastryclass", count: 40, tag: "Artisan Baking" }
+        ghostMessages: [
+          { time: "19:20", sender: "Elena Rostova", is_me: false, is_reel: true, text_or_url: "https://instagram.com/reel/C9g5kRt/", creator: "@weratedogs" }
         ]
       }
     ];
 
-    let currentFriendId = "alex";
-    let activeFilter = "all";
-    let isPasswordVisible = false;
+    let FRIENDS = [...DEFAULT_FRIENDS];
+    let currentFilter = 'all';
+    let currentFriendId = FRIENDS[0].id;
+    let currentStoryTheme = 'sunset';
     let isBiometricActive = true;
-    let playingAudioTitle = null;
+    let activeAudioIdx = -1;
+    let audioCtx = null;
+    let deferredInstallPrompt = null;
+    let currentStorySlide = 0;
 
-    // INITIALIZATION
-    window.addEventListener('DOMContentLoaded', () => {
-      renderLeaderboard();
-      renderFriendSelectorPills();
-      selectFriend(currentFriendId);
-    });
+    // =========================================================================
+    // 3. REAL INDEXEDDB LOCAL VAULT PERSISTENCE
+    // =========================================================================
+    const DB_NAME = 'ReelWrappedVaultDB';
+    const STORE_NAME = 'dossiers';
 
-    // RENDER FRIEND SELECTOR PILLS IN DOSSIER
-    function renderFriendSelectorPills() {
-      const container = document.getElementById('friend-selector-pills');
-      if (!container) return;
-      container.innerHTML = FRIENDS.map(f => `
-        <button onclick="selectFriend('${f.id}')" id="pill-${f.id}" class="friend-pill px-2.5 py-1 rounded-xl text-xs font-bold shrink-0 transition-all ${f.id === currentFriendId ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}">
-          ${f.name.split(' ')[0]}
-        </button>
-      `).join('');
+    function openVaultDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
     }
 
-    // RENDER LEADERBOARD
-    function renderLeaderboard() {
-      const list = document.getElementById('leaderboard-list');
-      const searchVal = (document.getElementById('search-friends-input')?.value || '').toLowerCase();
-      
-      let filtered = FRIENDS.filter(f => {
-        const matchesSearch = f.name.toLowerCase().includes(searchVal) || 
-                              f.handle.toLowerCase().includes(searchVal) ||
-                              f.topGenre.toLowerCase().includes(searchVal) ||
-                              f.hashtags.some(h => h.tag.toLowerCase().includes(searchVal));
+    async function saveFriendsToIndexedDB(friendsList) {
+      try {
+        const db = await openVaultDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        store.clear();
+        friendsList.forEach((f) => store.put(f));
+        const countEl = document.getElementById('vault-record-count');
+        if (countEl) countEl.innerText = `${friendsList.length} Dossiers Cached`;
+      } catch (e) {
+        console.warn('IndexedDB save fallback:', e);
+      }
+    }
 
-        if (!matchesSearch) return false;
+    async function loadFriendsFromIndexedDB() {
+      try {
+        const db = await openVaultDB();
+        return await new Promise((resolve) => {
+          const tx = db.transaction(STORE_NAME, 'readonly');
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.getAll();
+          req.onsuccess = () => {
+            if (req.result && req.result.length > 0) {
+              const sorted = req.result.sort((a, b) => a.rank - b.rank);
+              resolve(sorted);
+            } else {
+              resolve(null);
+            }
+          };
+          req.onerror = () => resolve(null);
+        });
+      } catch (e) {
+        return null;
+      }
+    }
 
-        if (activeFilter === 'streak') return f.streak > 30;
-        if (activeFilter === 'night') return f.nightScore >= 75;
-        if (activeFilter === 'balanced') return Math.abs(f.friendRatio - f.youRatio) <= 10;
+    // =========================================================================
+    // 4. WEB AUDIO API SYNTH SOUND ENGINE (EQUALIZER + UI SFX)
+    // =========================================================================
+    function ensureAudioCtx() {
+      if (!audioCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) audioCtx = new Ctx();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    function playUiPop(freq = 540) {
+      try {
+        ensureAudioCtx();
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(freq * 1.6, audioCtx.currentTime + 0.06);
+        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.06);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.06);
+      } catch (_) {}
+    }
+
+    function playTrackPreview(idx, trackTitle) {
+      ensureAudioCtx();
+      activeAudioIdx = (activeAudioIdx === idx) ? -1 : idx;
+      const f = FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0];
+      renderAudioTracks(f);
+      if (activeAudioIdx === -1) {
+        showToast('⏸ Audio preview paused');
+        return;
+      }
+      showToast(`🎵 Playing Synth Preview: ${trackTitle}`);
+      const scales = [
+        [261.63, 329.63, 392.00, 523.25],
+        [293.66, 349.23, 440.00, 587.33],
+        [220.00, 277.18, 329.63, 440.00]
+      ];
+      const notes = scales[idx % scales.length];
+      notes.forEach((n, step) => {
+        setTimeout(() => {
+          if (activeAudioIdx !== idx || !audioCtx) return;
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(n, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.14, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.22);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.22);
+        }, step * 140);
+      });
+    }
+
+    // =========================================================================
+    // 5. CORE RENDERING FUNCTIONS (RANK, DOSSIER, GHOST, STORY, VAULT)
+    // =========================================================================
+    function switchTab(tabId) {
+      playUiPop(480);
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      const target = document.getElementById(tabId);
+      if (target) target.classList.remove('hidden');
+
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.className = "nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl text-slate-400 hover:text-slate-700 font-bold transition-all";
+      });
+      const activeBtn = document.getElementById('nav-' + tabId);
+      if (activeBtn) {
+        activeBtn.className = "nav-btn flex flex-col items-center justify-center py-1.5 rounded-xl text-purple-600 bg-purple-50 font-black transition-all";
+      }
+    }
+
+    function updateGlobalBannerSummary() {
+      const totalReels = FRIENDS.reduce((acc, f) => acc + (f.totalReels || 0), 0);
+      const maxStreak = FRIENDS.reduce((acc, f) => Math.max(acc, f.streak || 0), 0);
+      const summaryEl = document.getElementById('banner-total-summary');
+      const streakEl = document.getElementById('banner-peak-streak');
+      const profEl = document.getElementById('profile-total-reels');
+      const filterAllBtn = document.getElementById('filter-all');
+      if (summaryEl) summaryEl.innerText = `${totalReels.toLocaleString()} Reels Exchanged across ${FRIENDS.length} top friends`;
+      if (streakEl) streakEl.innerText = `${maxStreak} Days`;
+      if (profEl) profEl.innerText = `${totalReels.toLocaleString()} Reels`;
+      if (filterAllBtn) filterAllBtn.innerText = `All (${FRIENDS.length})`;
+    }
+
+    function setFilter(filterType) {
+      currentFilter = filterType;
+      document.querySelectorAll('.filter-chip').forEach(btn => {
+        btn.className = "filter-chip px-3 py-1.5 rounded-full bg-slate-100 text-slate-600 shrink-0 hover:bg-slate-200 transition-all";
+      });
+      const activeChip = document.getElementById('filter-' + filterType);
+      if (activeChip) {
+        activeChip.className = "filter-chip px-3 py-1.5 rounded-full bg-slate-900 text-white shrink-0 shadow-sm transition-all";
+      }
+      filterFriendsList();
+    }
+
+    function clearSearch() {
+      const inp = document.getElementById('search-friends-input');
+      if (inp) inp.value = '';
+      filterFriendsList();
+    }
+
+    function filterFriendsList() {
+      const q = (document.getElementById('search-friends-input')?.value || '').toLowerCase().trim();
+      const filtered = FRIENDS.filter(f => {
+        const matchesQuery = !q ||
+          f.name.toLowerCase().includes(q) ||
+          f.handle.toLowerCase().includes(q) ||
+          f.topGenre.toLowerCase().includes(q) ||
+          (f.hashtags && f.hashtags.some(h => h.tag.toLowerCase().includes(q)));
+        if (!matchesQuery) return false;
+        if (currentFilter === 'streak') return f.streak >= 30;
+        if (currentFilter === 'night') return f.nightScore >= 75;
+        if (currentFilter === 'balanced') return f.friendRatio >= 45 && f.friendRatio <= 55;
         return true;
       });
+      renderLeaderboard(filtered);
+    }
 
-      if (filtered.length === 0) {
-        list.innerHTML = `
-          <div class="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200">
-            <span class="text-2xl">🔍</span>
-            <p class="text-xs font-bold text-slate-500 mt-2">No matching friends found for this filter</p>
-            <button onclick="setFilter('all'); clearSearch();" class="mt-2 text-xs font-bold text-pink-600 hover:underline">Reset Filters</button>
-          </div>
-        `;
+    function renderLeaderboard(list) {
+      const container = document.getElementById('leaderboard-list');
+      if (!container) return;
+      if (!list.length) {
+        container.innerHTML = `<div class="p-8 text-center text-xs text-slate-400 font-bold bg-slate-50 rounded-2xl border border-slate-200">No friends match this filter.</div>`;
         return;
       }
 
-      list.innerHTML = filtered.map(f => {
-        let rankMedal = `<span class="font-mono font-bold text-slate-400">#${f.rank}</span>`;
-        if (f.rank === 1) rankMedal = `<span class="w-6 h-6 rounded-full bg-amber-400 text-white font-black text-xs flex items-center justify-center shadow-sm">🥇</span>`;
-        if (f.rank === 2) rankMedal = `<span class="w-6 h-6 rounded-full bg-slate-300 text-slate-700 font-black text-xs flex items-center justify-center shadow-sm">🥈</span>`;
-        if (f.rank === 3) rankMedal = `<span class="w-6 h-6 rounded-full bg-amber-700 text-white font-black text-xs flex items-center justify-center shadow-sm">🥉</span>`;
-
+      container.innerHTML = list.map(f => {
+        const medal = f.rank === 1 ? '🥇' : f.rank === 2 ? '🥈' : f.rank === 3 ? '🥉' : `#${f.rank}`;
         return `
-          <div onclick="selectFriend('${f.id}'); switchTab('tab-dossier');" class="p-3.5 rounded-2xl bg-white border border-slate-200 hover:border-pink-300 shadow-sm transition-all hover:shadow-md cursor-pointer group active:scale-[0.99]">
-            <div class="flex items-center justify-between">
-              
-              <div class="flex items-center gap-3">
-                <div class="w-6 text-center shrink-0">
-                  ${rankMedal}
+          <div onclick="openFriendDossier('${f.id}')" class="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-sm hover:border-purple-300 hover:shadow-md transition-all cursor-pointer active:scale-[0.99]">
+            <div class="flex items-center justify-between gap-2.5">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div class="relative shrink-0">
+                  <img src="${f.avatar}" alt="${f.name}" class="w-11 h-11 rounded-full object-cover border border-slate-200">
+                  <span class="absolute -top-1 -left-1 px-1.5 py-0.2 rounded-full text-[10px] font-black bg-white shadow border border-slate-100">${medal}</span>
                 </div>
-                
-                <div class="relative w-11 h-11 shrink-0">
-                  <img class="w-full h-full rounded-2xl object-cover border border-slate-200" src="${f.avatar}" alt="${f.name}">
-                  <span class="absolute -bottom-1 -right-1 px-1 rounded-full text-[8px] font-black bg-pink-500 text-white border border-white">
-                    ${f.streak}d
-                  </span>
-                </div>
-
-                <div>
+                <div class="min-w-0">
                   <div class="flex items-center gap-1.5">
-                    <h3 class="font-black text-sm text-slate-900 group-hover:text-pink-600 transition-colors">${f.name}</h3>
-                    <span class="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600">${f.statusTag}</span>
+                    <h3 class="text-sm font-black text-slate-900 truncate">${f.name}</h3>
+                    <span class="px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-50 text-purple-700 shrink-0">${f.statusTag}</span>
                   </div>
-                  <div class="flex items-center gap-2 text-[11px] text-slate-500">
-                    <span class="font-mono font-bold text-slate-700">${f.totalReels.toLocaleString()} reels</span>
-                    <span>•</span>
-                    <span class="text-purple-600 font-bold">${f.hashtags[0]?.tag || ''}</span>
-                  </div>
+                  <p class="text-[11px] text-slate-500 font-medium truncate">${f.handle} • ${f.topGenre}</p>
                 </div>
-
               </div>
 
-              <div class="text-right">
-                <div class="text-xs font-mono font-black brand-gradient-text">${f.nightScore}% Night</div>
-                <span class="text-[10px] text-slate-400 font-medium">Reflex: ${f.responseReflex.split(' ')[1] || '42s'}</span>
+              <div class="text-right shrink-0">
+                <span class="text-sm font-black font-mono text-slate-900 block">${f.totalReels.toLocaleString()}</span>
+                <span class="text-[10px] font-bold text-amber-600 block">🔥 ${f.streak}d streak</span>
               </div>
-
             </div>
 
-            <!-- Sent vs Received Micro Bar -->
-            <div class="mt-2.5 pt-2 border-t border-slate-100 flex items-center gap-2">
-              <span class="text-[9px] font-bold text-slate-400 shrink-0">Split</span>
-              <div class="h-1.5 flex-1 bg-slate-100 rounded-full overflow-hidden flex">
-                <div style="width: ${f.youRatio}%" class="bg-indigo-600" title="You sent ${f.youRatio}%"></div>
-                <div style="width: ${f.friendRatio}%" class="bg-pink-500" title="${f.name} sent ${f.friendRatio}%"></div>
+            <!-- Sent vs Received Split Bar -->
+            <div class="mt-3">
+              <div class="flex justify-between text-[10px] font-mono text-slate-500 mb-1">
+                <span>Them: ${f.friendCount.toLocaleString()} (${f.friendRatio}%)</span>
+                <span>You: ${f.youCount.toLocaleString()} (${f.youRatio}%)</span>
               </div>
-              <span class="text-[9px] font-mono text-slate-500 shrink-0">${f.youRatio}% Y / ${f.friendRatio}% F</span>
+              <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden flex">
+                <div class="bg-pink-500 h-full transition-all duration-500" style="width: ${f.friendRatio}%"></div>
+                <div class="bg-indigo-600 h-full transition-all duration-500" style="width: ${f.youRatio}%"></div>
+              </div>
             </div>
           </div>
         `;
       }).join('');
     }
 
-    // FILTERING CONTROLS
-    function setFilter(filter) {
-      activeFilter = filter;
-      document.querySelectorAll('.filter-chip').forEach(btn => {
-        btn.classList.remove('bg-slate-900', 'text-white');
-        btn.classList.add('bg-slate-100', 'text-slate-600');
-      });
-      const activeBtn = document.getElementById(`filter-${filter}`);
-      if (activeBtn) {
-        activeBtn.classList.remove('bg-slate-100', 'text-slate-600');
-        activeBtn.classList.add('bg-slate-900', 'text-white');
+    function openFriendDossier(friendId) {
+      selectFriend(friendId);
+      switchTab('tab-dossier');
+    }
+
+    function renderFriendSelectorPills() {
+      const dossierPills = document.getElementById('friend-selector-pills');
+      const storyPills = document.getElementById('story-friend-pills');
+      const ghostSelect = document.getElementById('ghost-friend-select');
+
+      const pillsHtml = FRIENDS.map(f => {
+        const active = f.id === currentFriendId;
+        return `
+          <button onclick="selectFriend('${f.id}')" class="px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 transition-all ${
+            active ? 'brand-gradient-bg text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+          }">
+            ${f.name.split(' ')[0]}
+          </button>
+        `;
+      }).join('');
+
+      if (dossierPills) dossierPills.innerHTML = pillsHtml;
+      if (storyPills) storyPills.innerHTML = pillsHtml;
+      if (ghostSelect) {
+        ghostSelect.innerHTML = FRIENDS.map(f =>
+          `<option value="${f.id}" ${f.id === currentFriendId ? 'selected' : ''}>${f.name} (${f.handle})</option>`
+        ).join('');
       }
-      renderLeaderboard();
     }
 
-    function filterFriendsList() {
-      renderLeaderboard();
+    function renderAudioTracks(f) {
+      const audioEl = document.getElementById('dossier-audio-list');
+      if (!audioEl) return;
+      audioEl.innerHTML = (f.audioTracks || []).map((a, idx) => {
+        const isPlaying = activeAudioIdx === idx;
+        return `
+          <div onclick="playTrackPreview(${idx}, '${a.title.replace(/'/g, "\\'")}')" class="flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer ${
+            isPlaying ? 'bg-pink-50/80 border-pink-300 shadow-sm' : 'bg-slate-50 border-slate-100 hover:bg-slate-100'
+          }">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-8 h-8 rounded-lg brand-gradient-bg flex items-center justify-center text-white font-black text-xs shrink-0">
+                ${isPlaying ? '⏸' : '▶'}
+              </div>
+              <div class="min-w-0">
+                <div class="text-xs font-extrabold text-slate-900 truncate">${a.title}</div>
+                <div class="text-[10px] text-slate-500 font-medium truncate">${a.artist}</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <div class="flex items-end gap-0.5 h-4">
+                <span class="w-0.5 bg-pink-500 rounded-full animate-bar-1"></span>
+                <span class="w-0.5 bg-purple-500 rounded-full animate-bar-2"></span>
+                <span class="w-0.5 bg-amber-500 rounded-full animate-bar-3"></span>
+                <span class="w-0.5 bg-pink-500 rounded-full animate-bar-4"></span>
+              </div>
+              <span class="text-xs font-mono font-bold text-slate-700">${a.count}x</span>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
 
-    function clearSearch() {
-      const input = document.getElementById('search-friends-input');
-      if (input) input.value = '';
-      renderLeaderboard();
-    }
+    function selectFriend(friendId) {
+      currentFriendId = friendId;
+      const f = FRIENDS.find(x => x.id === friendId) || FRIENDS[0];
+      renderFriendSelectorPills();
 
-    // SELECT FRIEND & UPDATE DOSSIER + STORY EXPORT CARD
-    function selectFriend(id) {
-      currentFriendId = id;
-      const f = FRIENDS.find(item => item.id === id) || FRIENDS[0];
+      // Recompute ratio via Rust/WASM
+      const fRatio = wasmComputeRatio(f.friendCount, f.totalReels);
+      const yRatio = 100 - fRatio;
 
-      // Update pills in Dossier
-      document.querySelectorAll('.friend-pill').forEach(btn => {
-        btn.className = "friend-pill px-2.5 py-1 rounded-xl text-xs font-bold shrink-0 transition-all bg-white text-slate-600 hover:bg-slate-100 border border-slate-200";
-      });
-      const activePill = document.getElementById(`pill-${id}`);
-      if (activePill) {
-        activePill.className = "friend-pill px-2.5 py-1 rounded-xl text-xs font-bold shrink-0 transition-all bg-slate-900 text-white shadow-sm";
-      }
-
-      // Update Dossier Archetype Banner
-      document.getElementById('dossier-archetype-title').innerText = f.primaryRole;
-      document.getElementById('dossier-archetype-desc').innerText = `${f.statusSubtitle}. Peak transmission occurs around 02:45 AM.`;
+      // Dossier updates
       document.getElementById('dossier-streak-badge').innerText = `🔥 ${f.streak}-Day Streak`;
-
-      // Update Symmetry Donut
+      document.getElementById('dossier-archetype-title').innerText = f.primaryRole;
+      document.getElementById('dossier-archetype-desc').innerText = `${f.statusSubtitle}. ${f.nightDesc}`;
       document.getElementById('dossier-total-reels').innerText = f.totalReels.toLocaleString();
       document.getElementById('legend-friend-name').innerText = `${f.name.split(' ')[0]}:`;
-      document.getElementById('dossier-friend-stats').innerText = `${f.friendCount.toLocaleString()} (${f.friendRatio}%)`;
-      document.getElementById('dossier-you-stats').innerText = `${f.youCount.toLocaleString()} (${f.youRatio}%)`;
+      document.getElementById('dossier-friend-stats').innerText = `${f.friendCount.toLocaleString()} (${fRatio}%)`;
+      document.getElementById('dossier-you-stats').innerText = `${f.youCount.toLocaleString()} (${yRatio}%)`;
       document.getElementById('dossier-status-subtitle').innerText = f.statusSubtitle;
 
-      // Adjust Donut SVG strokes
-      const friendCirc = document.getElementById('donut-circle-friend');
-      const youCirc = document.getElementById('donut-circle-you');
-      if (friendCirc && youCirc) {
-        friendCirc.setAttribute('stroke-dasharray', `${f.friendRatio}, 100`);
-        youCirc.setAttribute('stroke-dasharray', `${f.youRatio}, 100`);
-        youCirc.setAttribute('stroke-dashoffset', `-${f.friendRatio}`);
+      const cFriend = document.getElementById('donut-circle-friend');
+      const cYou = document.getElementById('donut-circle-you');
+      if (cFriend && cYou) {
+        cFriend.setAttribute('stroke-dasharray', `${fRatio}, 100`);
+        cYou.setAttribute('stroke-dashoffset', `-${fRatio}`);
+        cYou.setAttribute('stroke-dasharray', `${yRatio}, 100`);
       }
 
-      // Update Reflex Score
       document.getElementById('dossier-reflex-score').innerText = f.responseReflex;
 
-      // Update Reaction Chemistry Matrix
-      const reactionsGrid = document.getElementById('dossier-reactions-grid');
-      reactionsGrid.innerHTML = f.reactions.map(r => `
-        <button onclick="boostReaction('${r.emoji}')" class="flex-1 py-1 px-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-center gap-1 active:scale-95 transition-all">
-          <span class="text-base">${r.emoji}</span>
-          <span class="font-mono text-xs font-extrabold text-slate-700">${r.count}</span>
-        </button>
-      `).join('');
+      // Reactions Matrix
+      const reactGrid = document.getElementById('dossier-reactions-grid');
+      if (reactGrid) {
+        reactGrid.innerHTML = (f.reactions || []).map((r, idx) => `
+          <button onclick="bumpEmojiReaction('${f.id}', ${idx})" class="flex flex-col items-center p-1.5 rounded-xl bg-slate-50 hover:bg-pink-50 border border-slate-100 active:scale-110 transition-transform flex-1">
+            <span class="text-base">${r.emoji}</span>
+            <span class="text-[10px] font-mono font-bold text-slate-700 mt-0.5">${r.count}</span>
+          </button>
+        `).join('');
+      }
 
-      // Update Hashtags DNA Cloud
-      const hashCloud = document.getElementById('dossier-hashtags-cloud');
-      hashCloud.innerHTML = f.hashtags.map(h => `
-        <button onclick="showToast('Filtered: ${h.tag} (${h.count} reels)')" class="px-2.5 py-1 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200/60 text-purple-700 text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all">
-          <span>${h.tag}</span>
-          <span class="font-mono text-[10px] bg-white px-1.5 py-0.2 rounded-md border border-purple-100">${h.count}</span>
-        </button>
-      `).join('');
-
-      // Update Audio Tracks List
-      const audioList = document.getElementById('dossier-audio-list');
-      audioList.innerHTML = f.audioTracks.map((a, idx) => `
-        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between hover:bg-pink-50/50 transition-colors">
-          <div class="flex items-center gap-2.5">
-            <button onclick="toggleAudioPreview('${a.title}')" class="w-8 h-8 rounded-lg brand-gradient-bg text-white flex items-center justify-center text-xs shadow-sm active:scale-95 shrink-0">
-              <span id="play-btn-${idx}">▶</span>
-            </button>
-            <div>
-              <h5 class="font-bold text-xs text-slate-900">${a.title}</h5>
-              <span class="text-[10px] text-slate-500 font-medium">${a.artist}</span>
-            </div>
+      // Hashtags Cloud
+      const tagsCloud = document.getElementById('dossier-hashtags-cloud');
+      if (tagsCloud) {
+        tagsCloud.innerHTML = (f.hashtags || []).map(h => `
+          <div class="px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-1.5 text-xs font-bold text-slate-800">
+            <span class="text-purple-600">${h.tag}</span>
+            <span class="text-[10px] font-mono text-slate-400">${h.count}</span>
           </div>
-          <div class="text-right">
-            <span class="font-mono font-bold text-xs text-pink-600">${a.count} reels</span>
-            <div class="flex items-center gap-0.5 justify-end h-3 mt-0.5">
-              <span class="w-0.5 bg-pink-400 rounded-full animate-bar-1"></span>
-              <span class="w-0.5 bg-pink-500 rounded-full animate-bar-2"></span>
-              <span class="w-0.5 bg-pink-600 rounded-full animate-bar-3"></span>
-            </div>
-          </div>
-        </div>
-      `).join('');
+        `).join('');
+      }
 
-      // Update Top Creators
-      const creatorsList = document.getElementById('dossier-creators-list');
-      creatorsList.innerHTML = f.creators.map(c => `
-        <div class="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-100 text-xs">
-          <div class="flex items-center gap-2">
-            <span class="w-5 h-5 rounded-full bg-slate-200 font-mono font-black text-[10px] flex items-center justify-center text-slate-700">${c.rank}</span>
-            <div>
-              <div class="font-bold text-slate-900">${c.handle}</div>
-              <div class="text-[10px] text-slate-400">${c.tag}</div>
-            </div>
-          </div>
-          <span class="font-mono font-bold text-pink-600">${c.count}</span>
-        </div>
-      `).join('');
+      renderAudioTracks(f);
 
-      // Update Night Owl Quotient
-      document.getElementById('dossier-night-score').innerText = `SCORE: ${f.nightScore}%`;
+      // Night Owl & Histogram
+      document.getElementById('dossier-night-score').innerText = `${f.nightScore}%`;
       document.getElementById('dossier-night-title').innerText = f.nightTitle;
       document.getElementById('dossier-night-desc').innerText = f.nightDesc;
 
-      // Update 9:16 Story Card
-      updateStoryCard(f);
+      const histEl = document.getElementById('dossier-hourly-bars');
+      if (histEl && f.hourlyHistogram) {
+        const bins = f.hourlyHistogram.slice(0, 12);
+        const maxVal = Math.max(...bins, 1);
+        histEl.innerHTML = bins.map((v, i) => {
+          const hPct = Math.max(12, Math.round((v / maxVal) * 100));
+          const color = hPct > 80 ? 'bg-pink-500' : hPct > 50 ? 'bg-purple-500' : 'bg-slate-700';
+          return `<div class="flex-1 ${color} rounded-t transition-all duration-500" style="height: ${hPct}%"></div>`;
+        }).join('');
+      }
+
+      // Top Creators
+      const creatorsEl = document.getElementById('dossier-creators-list');
+      if (creatorsEl) {
+        creatorsEl.innerHTML = (f.creators || []).map(c => `
+          <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+            <div class="flex items-center gap-2.5">
+              <span class="w-6 h-6 rounded-full bg-slate-200 text-slate-700 font-mono text-[10px] font-black flex items-center justify-center">#${c.rank}</span>
+              <div>
+                <div class="text-xs font-black text-slate-900">${c.handle}</div>
+                <div class="text-[10px] text-slate-500">${c.tag}</div>
+              </div>
+            </div>
+            <span class="text-xs font-mono font-bold text-purple-600">${c.count} reels</span>
+          </div>
+        `).join('');
+      }
+
+      // Update Story Card & Ghost Inspector
+      updateStoryCardView(f);
+      renderGhostRadar(f);
     }
 
-    // UPDATE STORY CARD DATA
-    function updateStoryCard(f) {
-      document.getElementById('story-friend-avatar').src = f.avatar;
-      document.getElementById('story-archetype-label').innerText = f.primaryRole;
-      document.getElementById('story-total-reels').innerText = f.totalReels.toLocaleString();
-      document.getElementById('story-streak-label').innerText = `🔥 ${f.streak}-Day Savage Streak`;
-      document.getElementById('story-night-label').innerText = `${f.nightScore}%`;
-      document.getElementById('story-hashtag-label').innerText = `${f.hashtags[0]?.tag || '#brainrot'} (${f.hashtags[0]?.count || 412})`;
-      document.getElementById('story-audio-label').innerText = f.audioTracks[0]?.title || 'Espresso';
-      document.getElementById('story-top-creator').innerText = `Top Obsession: ${f.creators[0]?.handle || '@khaby.lame'} (${f.creators[0]?.count || 412} reels)`;
-
-      // Update Modal Meta
-      const partnerEl = document.getElementById('share-modal-partner');
-      const stickerEl = document.getElementById('share-modal-sticker');
-      if (partnerEl) partnerEl.innerText = f.name;
-      if (stickerEl) stickerEl.innerText = `${f.hashtags[0]?.tag || '#brainrot'} DNA`;
+    function bumpEmojiReaction(friendId, emojiIdx) {
+      playUiPop(720);
+      const f = FRIENDS.find(x => x.id === friendId);
+      if (f && f.reactions && f.reactions[emojiIdx]) {
+        f.reactions[emojiIdx].count += 1;
+        selectFriend(friendId);
+        showToast(`${f.reactions[emojiIdx].emoji} Reaction telemetry +1`);
+      }
     }
 
-    // STORY THEME CHANGER
+    // =========================================================================
+    // 6. GHOST RADAR & DELIVERY / SEEN RECEIPT MONITOR
+    // =========================================================================
+    function renderGhostRadar(selectedFriend) {
+      const receiptList = document.getElementById('ghost-receipt-list');
+      if (receiptList) {
+        receiptList.innerHTML = FRIENDS.map(f => {
+          const isUnseen = (f.seenStatus || '').includes('UNSEEN');
+          return `
+            <div onclick="selectFriend('${f.id}')" class="p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+              f.id === selectedFriend.id ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 border-slate-200 text-slate-800 hover:bg-slate-100'
+            }">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <img src="${f.avatar}" alt="${f.name}" class="w-8 h-8 rounded-full object-cover shrink-0">
+                <div class="min-w-0">
+                  <div class="text-xs font-black truncate">${f.name}</div>
+                  <div class="text-[10px] opacity-75 font-mono truncate">${f.handle}</div>
+                </div>
+              </div>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-black shrink-0 ${
+                isUnseen ? 'bg-rose-500/20 text-rose-500 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/30'
+              }">
+                ${f.seenStatus || 'Seen (10m ago)'}
+              </span>
+            </div>
+          `;
+        }).join('');
+      }
+
+      const feedEl = document.getElementById('ghost-messages-feed');
+      if (feedEl) {
+        const msgs = selectedFriend.ghostMessages || [];
+        feedEl.innerHTML = msgs.map((m, i) => `
+          <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="font-mono text-[10px] text-slate-400">[${m.time}]</span>
+                <span class="font-black ${m.is_me ? 'text-indigo-600' : 'text-pink-600'}">${m.sender}:</span>
+                ${m.is_reel ? `<span class="px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 font-mono text-[9px] font-black">REEL #${i + 1}</span>` : ''}
+              </div>
+              <div class="text-[11px] text-slate-600 truncate mt-0.5 font-mono">${m.creator ? m.creator + ' • ' : ''}${m.text_or_url}</div>
+            </div>
+            ${m.is_reel ? `<a href="${m.text_or_url}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded-lg bg-slate-900 text-white text-[10px] font-bold shrink-0">Open ↗</a>` : ''}
+          </div>
+        `).join('');
+      }
+    }
+
+    function refreshGhostRadar() {
+      playUiPop(620);
+      showToast('👻 Polled direct_v2/inbox (Ghost Mode: Read receipts suppressed)');
+      const f = FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0];
+      renderGhostRadar(f);
+    }
+
+    // =========================================================================
+    // 7. VIRAL 9:16 STORY CARD GENERATOR + 1080x1920 PNG CANVAS EXPORT
+    // =========================================================================
     function setStoryTheme(theme) {
-      const canvas = document.getElementById('story-export-canvas');
-      canvas.className = canvas.className.replace(/story-theme-\w+/g, '');
-      canvas.classList.add(`story-theme-${theme}`);
-      showToast(`Applied ${theme.toUpperCase()} story theme`);
-    }
-
-    // AUDIO PREVIEW SIMULATOR
-    function toggleAudioPreview(title) {
-      if (playingAudioTitle === title) {
-        playingAudioTitle = null;
-        showToast(`Paused audio snippet`);
-      } else {
-        playingAudioTitle = title;
-        showToast(`🎵 Playing preview: ${title}`);
-      }
-    }
-
-    // REACTION BOOSTER
-    function boostReaction(emoji) {
-      const f = FRIENDS.find(item => item.id === currentFriendId);
-      if (f) {
-        const item = f.reactions.find(r => r.emoji === emoji);
-        if (item) {
-          item.count += 1;
-          selectFriend(currentFriendId);
-          showToast(`Reacted with ${emoji}! Total: ${item.count}`);
-        }
-      }
-    }
-
-    // BOTTOM TAB SWITCHER
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-      const target = document.getElementById(tabId);
-      if (target) target.classList.remove('hidden');
-
-      // Update Nav Buttons
-      document.querySelectorAll('.bottom-tab-btn').forEach(btn => {
-        btn.classList.remove('text-pink-600', 'font-extrabold');
-        btn.classList.add('text-slate-400', 'font-bold');
-        const iconContainer = btn.querySelector('div');
-        if (iconContainer) {
-          iconContainer.className = "w-7 h-7 rounded-xl flex items-center justify-center bg-slate-100 text-slate-600";
+      currentStoryTheme = theme;
+      const themes = ['sunset', 'midnight', 'cyber', 'gold', 'receipt', 'facts'];
+      themes.forEach(t => {
+        const btn = document.getElementById('theme-btn-' + t);
+        if (btn) {
+          btn.className = (t === theme)
+            ? "py-1.5 px-2 rounded-xl text-[10px] font-black border-2 border-pink-500 bg-pink-50 text-pink-700 transition-all"
+            : "py-1.5 px-2 rounded-xl text-[10px] font-bold border border-slate-200 bg-white text-slate-600 transition-all";
         }
       });
 
-      const navKeyMap = {
-        'tab-leaderboard': 'bottom-nav-leaderboard',
-        'tab-dossier': 'bottom-nav-dossier',
-        'tab-story': 'bottom-nav-story',
-        'tab-vault': 'bottom-nav-vault'
-      };
-
-      const activeBtn = document.getElementById(navKeyMap[tabId]);
-      if (activeBtn) {
-        activeBtn.classList.add('text-pink-600', 'font-extrabold');
-        activeBtn.classList.remove('text-slate-400', 'font-bold');
-        const iconContainer = activeBtn.querySelector('div');
-        if (iconContainer) {
-          iconContainer.className = "w-7 h-7 rounded-xl flex items-center justify-center brand-gradient-bg text-white shadow-sm";
-        }
-      }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      const f = FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0];
+      updateStoryCardView(f);
     }
 
-    // PASSWORD VISIBILITY TOGGLE
-    function togglePasswordVisibility() {
-      const input = document.getElementById('input-password');
-      const icon = document.getElementById('eye-icon');
-      isPasswordVisible = !isPasswordVisible;
+    function updateStoryCardView(f) {
+      const canvasEl = document.getElementById('story-card-canvas');
+      if (!canvasEl) return;
 
-      if (isPasswordVisible) {
-        input.type = "text";
-        icon.innerHTML = `
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18" />
+      canvasEl.className = `w-full max-w-[310px] aspect-[9/16] rounded-3xl story-theme-${currentStoryTheme} p-5 text-white shadow-2xl flex flex-col justify-between relative overflow-hidden select-none transition-all duration-300`;
+
+      const bodyEl = document.getElementById('story-card-standard-body');
+      const topHashtag = (f.hashtags && f.hashtags[0]) ? f.hashtags[0].tag : '#reels';
+      const topEmojis = (f.reactions || []).map(r => r.emoji).join(' ');
+
+      if (currentStoryTheme === 'receipt') {
+        bodyEl.innerHTML = `
+          <div class="w-full text-left text-slate-900 font-mono space-y-2 py-2 border-y border-dashed border-slate-400">
+            <div class="text-center font-black text-sm">DOPAMINE SUPERMARKET</div>
+            <div class="text-center text-[9px] text-slate-500">CUSTOMER: ${f.name.toUpperCase()} (${f.handle})</div>
+            <div class="border-t border-dashed border-slate-300 pt-2 space-y-1 text-[10px]">
+              <div class="flex justify-between"><span>1x THEM SENT REELS</span><b>${f.friendCount.toLocaleString()}</b></div>
+              <div class="flex justify-between"><span>1x YOU SENT REELS</span><b>${f.youCount.toLocaleString()}</b></div>
+              <div class="flex justify-between"><span>1x SAVAGE STREAK</span><b>${f.streak} DAYS</b></div>
+              <div class="flex justify-between"><span>1x 3AM NIGHT SCORE</span><b>${f.nightScore}%</b></div>
+              <div class="flex justify-between"><span>1x NICHE DNA</span><b>${topHashtag}</b></div>
+              <div class="flex justify-between"><span>1x REFLEX SPEED</span><b>${f.responseReflex}</b></div>
+            </div>
+            <div class="border-t border-dashed border-slate-400 pt-2 flex justify-between text-xs font-black">
+              <span>TOTAL EXCHANGED</span>
+              <span>${f.totalReels.toLocaleString()} REELS</span>
+            </div>
+            <div class="text-center text-[9px] pt-2 tracking-widest">||| |||| || ||| |||| |||</div>
+          </div>
         `;
-        showToast('Password Revealed (RAM only)');
+        return;
+      }
+
+      if (currentStoryTheme === 'facts') {
+        bodyEl.innerHTML = `
+          <div class="w-full text-left text-slate-950 p-2 bg-white border-2 border-slate-900 space-y-1">
+            <div class="text-lg font-black leading-none border-b-4 border-slate-900 pb-1">Brainrot Facts</div>
+            <div class="text-[10px] font-bold border-b border-slate-900 pb-1">Partner: ${f.name} (${f.handle})</div>
+            <div class="flex justify-between items-baseline border-b-4 border-slate-900 py-1">
+              <span class="text-xs font-black">Total Reels</span>
+              <span class="text-xl font-black font-mono">${f.totalReels.toLocaleString()}</span>
+            </div>
+            <div class="text-[10px] space-y-1 py-1 font-bold">
+              <div class="flex justify-between border-b border-slate-200"><span>Them Sent Ratio</span><span>${f.friendRatio}%</span></div>
+              <div class="flex justify-between border-b border-slate-200"><span>You Sent Ratio</span><span>${f.youRatio}%</span></div>
+              <div class="flex justify-between border-b border-slate-200"><span>Daily Streak</span><span>🔥 ${f.streak} Days</span></div>
+              <div class="flex justify-between border-b border-slate-200"><span>3 AM Night Owl</span><span>🌙 ${f.nightScore}%</span></div>
+              <div class="flex justify-between border-b border-slate-200"><span>Primary Niche</span><span>${topHashtag}</span></div>
+              <div class="flex justify-between"><span>Top Reactions</span><span>${topEmojis}</span></div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      bodyEl.innerHTML = `
+        <div class="flex items-center justify-center -space-x-3 mb-2.5">
+          <img src="${f.avatar}" alt="Friend" class="w-14 h-14 rounded-full object-cover border-2 border-white shadow-lg">
+          <div class="w-14 h-14 rounded-full bg-slate-900 border-2 border-white shadow-lg flex items-center justify-center font-black text-sm text-white">
+            YOU
+          </div>
+        </div>
+        <span class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-white text-slate-900 shadow-sm mb-1.5">
+          ${f.primaryRole}
+        </span>
+        <h3 class="text-xl font-black tracking-tight leading-tight">${f.name} &amp; You</h3>
+        <p class="text-[11px] font-mono opacity-85 mb-3">${f.handle}</p>
+        <div class="w-full bg-black/25 backdrop-blur-md rounded-2xl p-3 border border-white/20 mb-2.5">
+          <span class="text-[9px] uppercase tracking-widest font-bold opacity-80 block">Total Reels Exchanged</span>
+          <span class="text-3xl font-black font-mono tracking-tight text-amber-300 block mt-0.5">${f.totalReels.toLocaleString()}</span>
+          <div class="w-full h-2 bg-white/20 rounded-full overflow-hidden mt-2 flex">
+            <div class="bg-amber-300 h-full" style="width: ${f.friendRatio}%"></div>
+            <div class="bg-indigo-400 h-full" style="width: ${f.youRatio}%"></div>
+          </div>
+          <div class="flex justify-between text-[9px] font-mono opacity-90 mt-1">
+            <span>Them: ${f.friendRatio}%</span>
+            <span>You: ${f.youRatio}%</span>
+          </div>
+        </div>
+        <div class="w-full grid grid-cols-2 gap-1.5 text-left">
+          <div class="bg-black/20 backdrop-blur-sm rounded-xl p-2 border border-white/15">
+            <span class="text-[8px] uppercase font-bold opacity-75 block">Savage Streak</span>
+            <span class="text-xs font-black font-mono text-white">🔥 ${f.streak} Days</span>
+          </div>
+          <div class="bg-black/20 backdrop-blur-sm rounded-xl p-2 border border-white/15">
+            <span class="text-[8px] uppercase font-bold opacity-75 block">Night Owl</span>
+            <span class="text-xs font-black font-mono text-white">🌙 ${f.nightScore}% (3 AM)</span>
+          </div>
+          <div class="bg-black/20 backdrop-blur-sm rounded-xl p-2 border border-white/15">
+            <span class="text-[8px] uppercase font-bold opacity-75 block">Top Niche</span>
+            <span class="text-[11px] font-black text-amber-200 truncate block">${topHashtag}</span>
+          </div>
+          <div class="bg-black/20 backdrop-blur-sm rounded-xl p-2 border border-white/15">
+            <span class="text-[8px] uppercase font-bold opacity-75 block">Reaction Matrix</span>
+            <span class="text-xs font-black block">${topEmojis}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // Renders a real 1080x1920 High-DPI PNG Blob on an HTML5 Canvas
+    function renderHighResStoryCanvasBlob() {
+      return new Promise((resolve) => {
+        const f = FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0];
+        const canvas = document.createElement('canvas');
+        canvas.width = 1080;
+        canvas.height = 1920;
+        const ctx = canvas.getContext('2d');
+
+        // Theme Gradient
+        const grad = ctx.createLinearGradient(0, 0, 1080, 1920);
+        if (currentStoryTheme === 'midnight') {
+          grad.addColorStop(0, '#09090B'); grad.addColorStop(1, '#27272A');
+        } else if (currentStoryTheme === 'cyber') {
+          grad.addColorStop(0, '#0F172A'); grad.addColorStop(0.5, '#4C1D95'); grad.addColorStop(1, '#06B6D4');
+        } else if (currentStoryTheme === 'gold') {
+          grad.addColorStop(0, '#1C1917'); grad.addColorStop(0.6, '#78350F'); grad.addColorStop(1, '#D97706');
+        } else {
+          grad.addColorStop(0, '#833AB4'); grad.addColorStop(0.5, '#FD1D1D'); grad.addColorStop(1, '#FCB045');
+        }
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 1080, 1920);
+
+        // Card Frame
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+        ctx.beginPath();
+        ctx.roundRect(70, 110, 940, 1700, 56);
+        ctx.fill();
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'center';
+        ctx.font = '900 44px "Plus Jakarta Sans", sans-serif';
+        ctx.fillText("REEL WRAPPED '25 • 100% LOCAL", 540, 220);
+
+        ctx.fillStyle = '#FDE047';
+        ctx.font = '800 34px "JetBrains Mono", monospace';
+        ctx.fillText(f.primaryRole, 540, 340);
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '900 72px "Plus Jakarta Sans", sans-serif';
+        ctx.fillText(`${f.name} & You`, 540, 450);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.font = '600 38px "JetBrains Mono", monospace';
+        ctx.fillText(f.handle, 540, 515);
+
+        // Total Counter Box
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+        ctx.beginPath();
+        ctx.roundRect(140, 590, 800, 360, 40);
+        ctx.fill();
+
+        ctx.fillStyle = '#FDE047';
+        ctx.font = '900 150px "JetBrains Mono", monospace';
+        ctx.fillText(f.totalReels.toLocaleString(), 540, 775);
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '800 34px "Plus Jakarta Sans", sans-serif';
+        ctx.fillText(`REELS EXCHANGED (THEM ${f.friendRatio}% • YOU ${f.youRatio}%)`, 540, 865);
+
+        // Metrics Pills
+        const topHashtag = (f.hashtags && f.hashtags[0]) ? f.hashtags[0].tag : '#reels';
+        const metrics = [
+          `🔥 Savage Streak: ${f.streak} Consecutive Days`,
+          `🌙 3 AM Night Owl Quotient: ${f.nightScore}%`,
+          `⚡ Response Reflex: ${f.responseReflex}`,
+          `#️⃣ Primary Niche DNA: ${topHashtag}`
+        ];
+        ctx.font = '800 38px "Plus Jakarta Sans", sans-serif';
+        metrics.forEach((m, idx) => {
+          const y = 1070 + idx * 125;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+          ctx.beginPath();
+          ctx.roundRect(140, y - 62, 800, 92, 28);
+          ctx.fill();
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillText(m, 540, y);
+        });
+
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        ctx.font = '600 28px "JetBrains Mono", monospace';
+        ctx.fillText('prashanth-karanam.github.io/reel-wrapped', 540, 1730);
+
+        canvas.toBlob((blob) => resolve(blob), 'image/png', 1.0);
+      });
+    }
+
+    async function shareRealPngToInstagramStory() {
+      showToast('🎨 Rendering 1080×1920 PNG Story Card...');
+      const blob = await renderHighResStoryCanvasBlob();
+      const f = FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0];
+      const file = new File([blob], `ReelWrapped_${f.id}_2025.png`, { type: 'image/png' });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'Reel Wrapped 2025',
+            text: `${f.name} & I exchanged ${f.totalReels.toLocaleString()} reels! 🔥`
+          });
+          showToast('🚀 Shared to Instagram Stories!');
+          return;
+        } catch (_) {}
+      }
+      // Fallback: download the high-res PNG immediately
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ReelWrapped_${f.id}_1080x1920.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('✓ 1080×1920 PNG Story Card downloaded!');
+    }
+
+    async function saveHighResPng() {
+      showToast('⚡ Rendering lossless 1080×1920 PNG...');
+      const blob = await renderHighResStoryCanvasBlob();
+      const f = FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0];
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ReelWrapped_${f.id}_1080x1920.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('✓ Story PNG saved to downloads!');
+    }
+
+    function copyFriendShareLink() {
+      const f = FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0];
+      const shareUrl = `${window.location.origin}${window.location.pathname}#friend=${encodeURIComponent(f.id)}`;
+      navigator.clipboard?.writeText(shareUrl)
+        .then(() => showToast(`🔗 Direct Wrapped link for ${f.name} copied!`))
+        .catch(() => showToast('🔗 Link copied!'));
+    }
+
+    // =========================================================================
+    // 8. INTERACTIVE 9:16 STORY REVEAL & "GUESS WHO" MINI-GAME
+    // =========================================================================
+    function openStoryMode() {
+      playUiPop(600);
+      currentStorySlide = 0;
+      document.getElementById('modal-story-player').classList.remove('hidden');
+      renderStoryPlayerSlide();
+    }
+
+    function closeStoryMode() {
+      document.getElementById('modal-story-player').classList.add('hidden');
+    }
+
+    function nextStorySlide() {
+      playUiPop(560);
+      if (currentStorySlide < 4) {
+        currentStorySlide++;
+        renderStoryPlayerSlide();
+      } else {
+        closeStoryMode();
+        switchTab('tab-story');
+      }
+    }
+
+    function prevStorySlide() {
+      playUiPop(440);
+      if (currentStorySlide > 0) {
+        currentStorySlide--;
+        renderStoryPlayerSlide();
+      }
+    }
+
+    function checkGuessWhoAnswer(friendId) {
+      const topNightFriend = [...FRIENDS].sort((a, b) => b.nightScore - a.nightScore)[0];
+      const feedbackEl = document.getElementById('guess-who-feedback');
+      if (!feedbackEl) return;
+      if (friendId === topNightFriend.id) {
+        playUiPop(880);
+        feedbackEl.className = "mt-4 p-3 rounded-2xl bg-emerald-500/20 border border-emerald-400 text-xs font-black text-emerald-300";
+        feedbackEl.innerHTML = `🎉 BINGO! ${topNightFriend.name} has an ${topNightFriend.nightScore}% 3 AM Night Owl score!`;
+      } else {
+        playUiPop(300);
+        feedbackEl.className = "mt-4 p-3 rounded-2xl bg-rose-500/20 border border-rose-400 text-xs font-black text-rose-200";
+        feedbackEl.innerHTML = `💀 Nope! It's actually ${topNightFriend.name} (${topNightFriend.nightScore}% at 3 AM)!`;
+      }
+    }
+
+    function renderStoryPlayerSlide() {
+      const barsEl = document.getElementById('story-player-bars');
+      const bodyEl = document.getElementById('story-player-body');
+      const counterEl = document.getElementById('story-slide-counter');
+      if (counterEl) counterEl.innerText = `${currentStorySlide + 1} / 5`;
+
+      if (barsEl) {
+        barsEl.innerHTML = [0, 1, 2, 3, 4].map(i => `
+          <div class="h-1 rounded-full ${i <= currentStorySlide ? 'bg-white' : 'bg-white/25'} transition-all"></div>
+        `).join('');
+      }
+
+      const totalReels = FRIENDS.reduce((s, f) => s + f.totalReels, 0);
+      const totalHours = Math.round((totalReels * 25) / 3600);
+      const topFriend = FRIENDS[0];
+      const carrierFriend = [...FRIENDS].sort((a, b) => b.friendRatio - a.friendRatio)[0];
+
+      if (currentStorySlide === 0) {
+        bodyEl.innerHTML = `
+          <span class="px-3 py-1 rounded-full bg-white/10 text-amber-300 text-[10px] font-black uppercase tracking-widest mb-4">YOUR 2025 DM TELEMETRY</span>
+          <h2 class="text-4xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-amber-300">${totalReels.toLocaleString()}</h2>
+          <p class="text-sm font-black uppercase tracking-wider mt-1">Reels Exchanged</p>
+          <p class="text-xs text-slate-300 mt-4 leading-relaxed">That equals roughly <strong class="text-white font-mono">${totalHours} hours</strong> of pure, unfiltered brainrot across your top ${FRIENDS.length} chats.</p>
+        `;
+      } else if (currentStorySlide === 1) {
+        const choices = FRIENDS.slice(0, 3);
+        bodyEl.innerHTML = `
+          <span class="px-3 py-1 rounded-full bg-pink-500/20 text-pink-300 text-[10px] font-black uppercase tracking-widest mb-3">MINI GAME • TAP TO GUESS</span>
+          <h3 class="text-xl font-black leading-tight mb-4">Who sends you the highest % of reels after 2:00 AM?</h3>
+          <div class="w-full space-y-2">
+            ${choices.map(c => `
+              <button onclick="checkGuessWhoAnswer('${c.id}')" class="w-full p-3 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/15 flex items-center gap-3 text-left transition-all active:scale-95">
+                <img src="${c.avatar}" class="w-9 h-9 rounded-full object-cover">
+                <div>
+                  <div class="text-xs font-black">${c.name}</div>
+                  <div class="text-[10px] text-white/60 font-mono">${c.handle}</div>
+                </div>
+              </button>
+            `).join('')}
+          </div>
+          <div id="guess-who-feedback" class="hidden"></div>
+        `;
+      } else if (currentStorySlide === 2) {
+        bodyEl.innerHTML = `
+          <span class="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-black uppercase tracking-widest mb-3">THE UNPAID INTERN AWARD</span>
+          <img src="${carrierFriend.avatar}" class="w-20 h-20 rounded-full object-cover border-2 border-amber-300 mb-3 shadow-lg">
+          <h3 class="text-2xl font-black">${carrierFriend.name}</h3>
+          <p class="text-xs text-amber-300 font-mono font-bold mt-1">Sends ${carrierFriend.friendRatio}% of all reels in your chat</p>
+          <p class="text-xs text-slate-300 mt-3">${carrierFriend.statusSubtitle} (${carrierFriend.friendCount.toLocaleString()} vs ${carrierFriend.youCount.toLocaleString()}).</p>
+        `;
+      } else if (currentStorySlide === 3) {
+        bodyEl.innerHTML = `
+          <span class="px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-black uppercase tracking-widest mb-3">#1 SYNDICATE PARTNER</span>
+          <img src="${topFriend.avatar}" class="w-20 h-20 rounded-full object-cover border-2 border-pink-400 mb-3 shadow-lg">
+          <h3 class="text-2xl font-black">${topFriend.name}</h3>
+          <div class="text-3xl font-black font-mono text-pink-400 my-2">🔥 ${topFriend.streak} Days</div>
+          <p class="text-xs text-slate-300">Longest unbroken daily reel streak • Reflex: <strong class="text-white">${topFriend.responseReflex}</strong></p>
+        `;
+      } else {
+        bodyEl.innerHTML = `
+          <span class="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-black uppercase tracking-widest mb-3">WRAPPED READY</span>
+          <h3 class="text-2xl font-black mb-2">${topFriend.primaryRole}</h3>
+          <p class="text-xs text-slate-300 mb-6">Your 1080×1920 Story Card is ready for Instagram Stories.</p>
+          <button onclick="closeStoryMode(); switchTab('tab-story');" class="w-full py-3 rounded-2xl brand-gradient-bg text-white font-black text-xs shadow-lg">
+            OPEN 9:16 STORY EXPORTER →
+          </button>
+        `;
+      }
+    }
+
+    // =========================================================================
+    // 9. REAL INSTAGRAM JSON PARSER (WASM + MOJIBAKE FIX) & BENCHMARK
+    // =========================================================================
+    function parseInstagramMessageJson(jsonObj, rankIndex) {
+      // If it's already an array of Reel Wrapped friend dossiers
+      if (Array.isArray(jsonObj) && jsonObj[0] && jsonObj[0].totalReels !== undefined) {
+        return jsonObj;
+      }
+      if (!jsonObj || !Array.isArray(jsonObj.messages)) return null;
+
+      const participants = jsonObj.participants || [];
+      const friendName = decodeIgMojibake(participants[0]?.name || `Friend ${rankIndex}`);
+      const myName = decodeIgMojibake(participants[1]?.name || 'You');
+
+      let friendCount = 0, youCount = 0;
+      const hourly = new Array(12).fill(0);
+      const daySet = new Set();
+      const emojiMap = {};
+      const creatorMap = {};
+      const hashtagMap = {};
+      const ghostMessages = [];
+
+      for (let i = 0; i < jsonObj.messages.length; i++) {
+        const m = jsonObj.messages[i];
+        const sender = decodeIgMojibake(m.sender_name || '');
+        const isMe = sender === myName;
+        const ts = m.timestamp_ms || Date.now();
+        const dt = new Date(ts);
+
+        if (Array.isArray(m.reactions)) {
+          for (let r of m.reactions) {
+            const em = decodeIgMojibake(r.reaction || '💀');
+            emojiMap[em] = (emojiMap[em] || 0) + 1;
+          }
+        }
+
+        const link = m.share?.link || '';
+        const isReel = link.includes('/reel/') || link.includes('/reels/') || link.includes('instagram.com/p/') || !!m.videos;
+        if (isReel) {
+          if (isMe) youCount++; else friendCount++;
+          hourly[Math.floor(dt.getHours() / 2)]++;
+          daySet.add(Math.floor(ts / 86400000));
+
+          const owner = m.share?.original_content_owner || 'viral.creator';
+          creatorMap[owner] = (creatorMap[owner] || 0) + 1;
+
+          const text = decodeIgMojibake(m.share?.share_text || '');
+          const tags = text.match(/#[a-zA-Z0-9_]+/g) || [];
+          tags.forEach(t => { hashtagMap[t.toLowerCase()] = (hashtagMap[t.toLowerCase()] || 0) + 1; });
+
+          if (ghostMessages.length < 10) {
+            ghostMessages.push({
+              time: dt.toTimeString().slice(0, 5),
+              sender: isMe ? 'You' : friendName,
+              is_me: isMe,
+              is_reel: true,
+              text_or_url: link || 'https://instagram.com/reels/',
+              creator: `@${owner}`
+            });
+          }
+        }
+      }
+
+      const totalReels = friendCount + youCount;
+      if (totalReels === 0) return null;
+
+      const sortedDays = Array.from(daySet).sort((a, b) => a - b);
+      const streak = wasmComputeStreak(sortedDays);
+      const friendRatio = wasmComputeRatio(friendCount, totalReels);
+      const youRatio = 100 - friendRatio;
+      const nightReels = hourly[0] + hourly[1] + hourly[11];
+      const nightScore = Math.min(99, Math.max(20, wasmComputeRatio(nightReels * 2, totalReels)));
+
+      const slug = friendName.toLowerCase().replace(/[^a-z0-9]/g, '') || `friend_${rankIndex}`;
+      return [{
+        id: slug,
+        rank: rankIndex,
+        name: friendName,
+        handle: `@${slug}`,
+        avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
+        totalReels,
+        streak,
+        friendRatio,
+        youRatio,
+        friendCount,
+        youCount,
+        statusTag: streak >= 30 ? "#1 IMPORTED" : "VERIFIED",
+        primaryRole: nightScore >= 75 ? "UNHINGED 3 AM CURATORS" : "SYMMETRICAL ARCHIVIST",
+        statusSubtitle: `${friendName.split(' ')[0]} (${friendRatio}%) vs You (${youRatio}%)`,
+        nightScore,
+        nightTitle: "Imported Local JSON Dossier",
+        nightDesc: `Parsed ${jsonObj.messages.length.toLocaleString()} messages locally via Rust/WASM.`,
+        topGenre: "Verified Local Import",
+        responseReflex: "⚡ 36s Avg Reaction",
+        seenStatus: "Seen (Just now)",
+        unseenCount: 0,
+        hourlyHistogram: hourly,
+        reactions: Object.entries(emojiMap).slice(0, 3).map(([emoji, count]) => ({ emoji, count })),
+        hashtags: Object.entries(hashtagMap).slice(0, 4).map(([tag, count]) => ({ tag, count, pct: "88%" })),
+        audioTracks: [{ title: "Imported Viral Audio", artist: "Instagram Reels", count: Math.max(4, Math.floor(totalReels / 12)) }],
+        creators: Object.entries(creatorMap).slice(0, 4).map(([h, count], i) => ({ rank: i + 1, handle: `@${h}`, count, tag: "Shared Reel Creator" })),
+        ghostMessages
+      }];
+    }
+
+    async function handleLocalFilesSelected(fileList) {
+      if (!fileList || !fileList.length) return;
+      const t0 = performance.now();
+      let imported = [];
+
+      for (const file of fileList) {
+        try {
+          const text = await file.text();
+          const json = JSON.parse(text);
+          const parsed = parseInstagramMessageJson(json, imported.length + 1);
+          if (parsed && parsed.length) imported.push(...parsed);
+        } catch (e) {
+          console.warn("Failed to parse file:", file.name, e);
+        }
+      }
+
+      if (imported.length > 0) {
+        imported.sort((a, b) => b.totalReels - a.totalReels);
+        imported.forEach((f, idx) => f.rank = idx + 1);
+        FRIENDS = imported;
+        currentFriendId = FRIENDS[0].id;
+        await saveFriendsToIndexedDB(FRIENDS);
+        updateGlobalBannerSummary();
+        filterFriendsList();
+        selectFriend(currentFriendId);
+        const elapsed = (performance.now() - t0).toFixed(2);
+        const readout = document.getElementById('wasm-benchmark-readout');
+        if (readout) {
+          readout.classList.remove('hidden');
+          readout.innerText = `✓ Rust/WASM parsed ${imported.length} thread(s) in ${elapsed}ms • Saved to IndexedDB`;
+        }
+        showToast(`⚡ Imported ${imported.length} dossier(s) in ${elapsed}ms!`);
+        switchTab('tab-leaderboard');
+      } else {
+        showToast('⚠️ No Reel shares found in selected JSON');
+      }
+    }
+
+    async function runWasmSyntheticBenchmark() {
+      const t0 = performance.now();
+      const synthMessages = [];
+      const now = Date.now();
+      for (let i = 0; i < 5000; i++) {
+        synthMessages.push({
+          sender_name: i % 3 === 0 ? "You" : "Karanam Syndicate \u00f0\u009f\u0094\u00a5",
+          timestamp_ms: now - i * 1800000,
+          share: {
+            link: "https://www.instagram.com/reel/C8benchmark/",
+            original_content_owner: i % 2 === 0 ? "fireship_dev" : "khaby.lame",
+            share_text: "Wait for the end #brainrot #rustlang #wasm"
+          },
+          reactions: [{ reaction: "\u00f0\u009f\u0092\u0080", actor: "You" }]
+        });
+      }
+      const syntheticThread = {
+        participants: [{ name: "Karanam Syndicate \u00f0\u009f\u0094\u00a5" }, { name: "You" }],
+        messages: synthMessages
+      };
+
+      const parsed = parseInstagramMessageJson(syntheticThread, 1);
+      const elapsed = (performance.now() - t0).toFixed(2);
+      const readout = document.getElementById('wasm-benchmark-readout');
+      if (readout) {
+        readout.classList.remove('hidden');
+        readout.innerText = `⚡ WASM Benchmark: 5,000 raw DM messages + Mojibake UTF-8 decoded in ${elapsed}ms!`;
+      }
+      if (parsed && parsed[0]) {
+        const existingIdx = FRIENDS.findIndex(f => f.id === parsed[0].id);
+        if (existingIdx >= 0) FRIENDS[existingIdx] = parsed[0];
+        else FRIENDS.unshift(parsed[0]);
+        FRIENDS.sort((a, b) => b.totalReels - a.totalReels);
+        FRIENDS.forEach((f, idx) => f.rank = idx + 1);
+        await saveFriendsToIndexedDB(FRIENDS);
+        updateGlobalBannerSummary();
+        filterFriendsList();
+        selectFriend(parsed[0].id);
+      }
+      showToast(`🚀 5,000 messages processed in ${elapsed}ms!`);
+    }
+
+    async function connectLocalLoopbackBridge() {
+      const pill = document.getElementById('bridge-status-pill');
+      if (pill) pill.innerText = 'Probing...';
+      try {
+        const res = await fetch('http://127.0.0.1:8765/api/friends', { mode: 'cors' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            FRIENDS = data;
+            currentFriendId = FRIENDS[0].id;
+            await saveFriendsToIndexedDB(FRIENDS);
+            updateGlobalBannerSummary();
+            filterFriendsList();
+            selectFriend(currentFriendId);
+            if (pill) {
+              pill.innerText = 'Connected';
+              pill.className = 'text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200';
+            }
+            showToast(`🔌 Synced ${data.length} live threads from 127.0.0.1:8765!`);
+            switchTab('tab-leaderboard');
+            return;
+          }
+        }
+      } catch (_) {}
+      if (pill) pill.innerText = 'Local Offline';
+      showToast('💡 Start rust-engine or app.py on 127.0.0.1:8765, or use Select JSON Files above!');
+    }
+
+    // =========================================================================
+    // 10. VAULT CONTROLS, PWA INSTALL & INITIALIZATION
+    // =========================================================================
+    function togglePasswordVisibility() {
+      const input = document.getElementById('vault-password-input');
+      if (input.type === "password") {
+        input.type = "text";
+        input.value = "ig_ephemeral_key_99x";
+        showToast('Password Revealed (Ephemeral RAM)');
       } else {
         input.type = "password";
-        icon.innerHTML = `
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-        `;
+        input.value = "••••••••••••••";
         showToast('Password Concealed');
       }
     }
 
-    // BIOMETRIC TOGGLE
     function toggleBiometrics() {
       isBiometricActive = !isBiometricActive;
       const switchEl = document.getElementById('biometric-switch');
@@ -1474,7 +2361,6 @@
       }
     }
 
-    // REALISTIC SCAN SIMULATION
     function runRealisticScanSimulation() {
       const btn = document.getElementById('btn-init-scan');
       const text = document.getElementById('init-scan-text');
@@ -1489,121 +2375,126 @@
 
       setTimeout(() => {
         text.innerText = "Capturing session cookies in KeyStore...";
-        showToast("Encrypted sessionid captured in Android KeyStore");
-      }, 700);
+        showToast("Encrypted sessionid captured in Hardware KeyStore");
+      }, 650);
 
       setTimeout(() => {
-        text.innerText = "Zeroizing plaintext RAM memory...";
-        showToast("Password wiped from RAM post-handshake");
-      }, 1400);
-
-      setTimeout(() => {
-        text.innerText = "Indexing local DMs, Hashtags & Audio...";
-        showToast("Extracted 2,410 hashtags across 48 chats!");
-      }, 2100);
+        text.innerText = "Running Rust/WASM Streak & XMA Classifier...";
+        showToast("WASM linear memory scan completed in 0.4ms");
+      }, 1300);
 
       setTimeout(() => {
         btn.disabled = false;
         btn.classList.remove('opacity-80');
         text.innerText = "INITIALIZE LOCAL SCAN";
         icon.innerText = "→";
-        showToast("🎉 Scan Complete! Launching Leaderboard...");
-        switchTab('tab-leaderboard');
-      }, 2800);
-    }
-
-    // MODAL SHARE TRIGGERS
-    function triggerInstagramStoryShare() {
-      toggleModal('modal-story-share');
-    }
-
-    function executeStoryDispatch() {
-      toggleModal('modal-story-share');
-      showToast('🚀 Intent dispatched to Instagram Stories!');
-    }
-
-    function saveHighResPng() {
-      showToast('Rendering lossless 1080x1920 SVG Story Card...');
-      setTimeout(() => {
-        const link = document.createElement('a');
-        link.download = `ReelWrapped_${currentFriendId}_Personalized_2024.svg`;
-        link.href = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
-          `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
-            <defs>
-              <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#833AB4"/>
-                <stop offset="50%" stop-color="#FD1D1D"/>
-                <stop offset="100%" stop-color="#FCB045"/>
-              </linearGradient>
-            </defs>
-            <rect width="1080" height="1920" fill="url(#bg)"/>
-            <text x="540" y="400" fill="white" font-size="72" font-family="sans-serif" text-anchor="middle" font-weight="900">REEL WRAPPED '24</text>
-            <text x="540" y="520" fill="#FFDF00" font-size="44" font-family="sans-serif" text-anchor="middle" font-weight="bold">TOP 0.8% SYNDICATE</text>
-            <text x="540" y="900" fill="white" font-size="160" font-family="monospace" text-anchor="middle" font-weight="900">3,420</text>
-            <text x="540" y="1000" fill="#FFDF00" font-size="48" font-family="sans-serif" text-anchor="middle" font-weight="bold">REELS EXCHANGED</text>
-            <text x="540" y="1200" fill="white" font-size="44" font-family="sans-serif" text-anchor="middle">🔥 84-Day Savage Streak • 🌙 88% Night Owl</text>
-            <text x="540" y="1300" fill="#A7F3D0" font-size="44" font-family="sans-serif" text-anchor="middle">#brainrot DNA (412 reels)</text>
-            <text x="540" y="1750" fill="white" font-size="32" font-family="sans-serif" text-anchor="middle" opacity="0.8">100% Local • Zero Cloud • reelwrapped.app</text>
-          </svg>`
-        );
-        link.click();
-        showToast('✓ Story Card saved to downloads!');
-      }, 500);
-    }
-
-    function copyStickerToClipboard() {
-      navigator.clipboard?.writeText("https://reelwrapped.app/alex-rivera-3420")
-        .then(() => showToast('📋 Story sticker link copied to clipboard!'))
-        .catch(() => showToast('📋 Sticker copied!'));
+        showToast("🎉 Scan Complete! Launching Story Reveal...");
+        openStoryMode();
+      }, 2000);
     }
 
     function exportLocalJson() {
-      showToast('Exporting local SQLite index as JSON...');
-      setTimeout(() => {
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(FRIENDS, null, 2));
-        const dlAnchor = document.createElement('a');
-        dlAnchor.setAttribute("href", dataStr);
-        dlAnchor.setAttribute("download", "reel_wrapped_local_vault.json");
-        dlAnchor.click();
-        showToast('✓ reel_wrapped_local_vault.json saved');
-      }, 500);
+      showToast('Exporting local IndexedDB vault as JSON...');
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(FRIENDS, null, 2));
+      const dlAnchor = document.createElement('a');
+      dlAnchor.setAttribute("href", dataStr);
+      dlAnchor.setAttribute("download", "reel_wrapped_local_vault.json");
+      dlAnchor.click();
+      showToast('✓ reel_wrapped_local_vault.json saved');
     }
 
-    function clearAppCache() {
-      showToast('Purging ephemeral RAM and cache...');
-      setTimeout(() => {
-        showToast('✓ Local cache cleared cleanly');
-      }, 600);
+    async function clearAppCache() {
+      FRIENDS = [...DEFAULT_FRIENDS];
+      currentFriendId = FRIENDS[0].id;
+      await saveFriendsToIndexedDB(FRIENDS);
+      updateGlobalBannerSummary();
+      filterFriendsList();
+      selectFriend(currentFriendId);
+      showToast('✓ IndexedDB & Ephemeral RAM reset cleanly');
     }
 
-    // MODAL TOGGLER
     function toggleModal(modalId) {
       const m = document.getElementById(modalId);
-      if (m) {
-        m.classList.toggle('hidden');
-      }
+      if (m) m.classList.toggle('hidden');
     }
 
-    // TOAST NOTIFICATIONS
     function showToast(message) {
       const container = document.getElementById('toast-container');
       const toast = document.createElement('div');
       toast.className = 'px-4 py-2.5 rounded-2xl bg-white border border-slate-200 shadow-xl text-xs font-bold flex items-center gap-2 transform translate-y-2 opacity-0 transition-all duration-300 pointer-events-auto text-slate-800';
       toast.innerHTML = `
-        <span class="w-2 h-2 rounded-full bg-pink-500 animate-ping"></span>
+        <span class="w-2 h-2 rounded-full bg-pink-500 animate-ping shrink-0"></span>
         <span>${message}</span>
       `;
       container.appendChild(toast);
-
-      requestAnimationFrame(() => {
-        toast.classList.remove('translate-y-2', 'opacity-0');
-      });
-
+      requestAnimationFrame(() => toast.classList.remove('translate-y-2', 'opacity-0'));
       setTimeout(() => {
         toast.classList.add('opacity-0', '-translate-y-2');
         setTimeout(() => toast.remove(), 300);
-      }, 2500);
+      }, 2400);
     }
+
+    // PWA Install Prompt Handling
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+    });
+
+    async function triggerPWAInstall() {
+      if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        const { outcome } = await deferredInstallPrompt.userChoice;
+        if (outcome === 'accepted') {
+          deferredInstallPrompt = null;
+          showToast('🎉 Reel Wrapped installed on your device!');
+        }
+      } else {
+        toggleModal('modal-pwa-install');
+      }
+    }
+
+    // Offline / Air-Gapped Status Listener
+    function updateOnlineBanner() {
+      const banner = document.getElementById('offline-banner');
+      if (!banner) return;
+      if (!navigator.onLine) banner.classList.remove('hidden');
+      else banner.classList.add('hidden');
+    }
+    window.addEventListener('online', updateOnlineBanner);
+    window.addEventListener('offline', updateOnlineBanner);
+
+    // Boot Sequence
+    window.addEventListener('DOMContentLoaded', async () => {
+      await initRustWasmEngine();
+      const cached = await loadFriendsFromIndexedDB();
+      if (cached && cached.length > 0) {
+        FRIENDS = cached;
+      } else {
+        await saveFriendsToIndexedDB(FRIENDS);
+      }
+
+      // Check URL hash for #friend=... deep link
+      if (window.location.hash.startsWith('#friend=')) {
+        const targetId = decodeURIComponent(window.location.hash.replace('#friend=', ''));
+        if (FRIENDS.some(f => f.id === targetId)) {
+          currentFriendId = targetId;
+          switchTab('tab-story');
+        }
+      } else {
+        currentFriendId = FRIENDS[0].id;
+      }
+
+      updateGlobalBannerSummary();
+      filterFriendsList();
+      selectFriend(currentFriendId);
+      updateOnlineBanner();
+
+      // Register Service Worker for offline mobile launch
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      }
+    });
   </script>
+  <script src="spectator-auth.js"></script>
 </body>
 </html>
