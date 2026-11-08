@@ -703,7 +703,7 @@
         <div class="space-y-2.5">
           <div>
             <label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Instagram Handle</label>
-            <input type="text" value="@prashanth.k" class="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-purple-500">
+            <input type="text" value="" placeholder="@yourusername" class="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-purple-500">
           </div>
 
           <div>
@@ -1726,7 +1726,7 @@
               </div>
               <div class="text-[11px] text-slate-600 truncate mt-0.5 font-mono">${m.creator ? m.creator + ' • ' : ''}${m.text_or_url}</div>
             </div>
-            ${m.is_reel ? `<a href="${m.text_or_url}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded-lg bg-slate-900 text-white text-[10px] font-bold shrink-0">Open ↗</a>` : ''}
+            ${m.is_reel ? `<button type="button" onclick="openInAppReelSpectator('${selectedFriend.id}', ${i})" class="px-2.5 py-1.5 rounded-lg brand-gradient-bg text-white text-[10px] font-black shrink-0 shadow-sm">👁️ Spectate In-App</button>` : ''}
           </div>
         `).join('');
       }
