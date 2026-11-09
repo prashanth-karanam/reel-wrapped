@@ -262,13 +262,13 @@
             All (6)
           </button>
           <button onclick="setFilter('streak')" id="filter-streak" class="filter-chip px-3 py-1.5 rounded-full bg-slate-100 text-slate-600 shrink-0 hover:bg-slate-200 transition-all">
-            🔥 Streaks (&gt;30d)
+            🔥 Active Streaks
           </button>
           <button onclick="setFilter('night')" id="filter-night" class="filter-chip px-3 py-1.5 rounded-full bg-slate-100 text-slate-600 shrink-0 hover:bg-slate-200 transition-all">
-            🌙 Night Owls (&gt;75%)
+            🌙 Night Owls (&gt;60%)
           </button>
           <button onclick="setFilter('balanced')" id="filter-balanced" class="filter-chip px-3 py-1.5 rounded-full bg-slate-100 text-slate-600 shrink-0 hover:bg-slate-200 transition-all">
-            ⚖️ 50/50 Balanced
+            ⚖️ Balanced (50/50)
           </button>
         </div>
       </div>
@@ -1446,19 +1446,26 @@
     }
 
     function updateGlobalBannerSummary() {
-      const list = (window.FRIENDS && window.FRIENDS.length > 0) ? window.FRIENDS : (typeof FRIENDS !== 'undefined' ? FRIENDS : []);
-      const totalReels = list.reduce((acc, f) => acc + (f.totalReels || 0), 0);
-      const maxStreak = list.reduce((acc, f) => Math.max(acc, f.bestStreak || f.streak || 0), 0);
+      const list = (window.FRIENDS && window.FRIENDS.length > 0) ? window.FRIENDS : (typeof FRIENDS !== 'undefined' && FRIENDS.length ? FRIENDS : []);
+      const totalReels = list.reduce((acc, f) => acc + (Number(f.totalReels) || ((Number(f.friendCount) || 0) + (Number(f.youCount) || 0)) || 0), 0);
+      const maxStreak = list.reduce((acc, f) => Math.max(acc, Number(f.bestStreak) || Number(f.streak) || 0), 0);
       const summaryEl = document.getElementById('banner-total-summary');
       const streakEl = document.getElementById('banner-peak-streak');
       const profEl = document.getElementById('profile-total-reels');
       const filterAllBtn = document.getElementById('filter-all');
-      if (summaryEl && (totalReels > 0 || list.length > 0)) {
-        summaryEl.innerText = `${totalReels.toLocaleString()} Reels Exchanged across ${list.length} top friends`;
+
+      if (summaryEl) {
+        if (totalReels > 0 && list.length > 0) {
+          summaryEl.innerText = `${totalReels.toLocaleString()} Reels Exchanged across ${list.length} top friends`;
+        } else if (list.length > 0) {
+          summaryEl.innerText = `Counting Reels across ${list.length} top friends... 🔄`;
+        } else {
+          summaryEl.innerText = `Counting Reels across your DM threads... 🔄`;
+        }
       }
       if (streakEl) streakEl.innerText = `${maxStreak} Days`;
       if (profEl && totalReels > 0) profEl.innerText = `${totalReels.toLocaleString()} Reels`;
-      if (filterAllBtn) filterAllBtn.innerText = `All (${list.length})`;
+      if (filterAllBtn && list.length > 0) filterAllBtn.innerText = `All (${list.length})`;
     }
 
     function setFilter(filterType) {
@@ -1480,17 +1487,18 @@
     }
 
     function filterFriendsList() {
+      const list = (window.FRIENDS && window.FRIENDS.length > 0) ? window.FRIENDS : (typeof FRIENDS !== 'undefined' ? FRIENDS : []);
       const q = (document.getElementById('search-friends-input')?.value || '').toLowerCase().trim();
-      const filtered = FRIENDS.filter(f => {
+      const filtered = list.filter(f => {
         const matchesQuery = !q ||
-          f.name.toLowerCase().includes(q) ||
-          f.handle.toLowerCase().includes(q) ||
-          f.topGenre.toLowerCase().includes(q) ||
-          (f.hashtags && f.hashtags.some(h => h.tag.toLowerCase().includes(q)));
+          (f.name || '').toLowerCase().includes(q) ||
+          (f.handle || '').toLowerCase().includes(q) ||
+          (f.topGenre || '').toLowerCase().includes(q) ||
+          (f.hashtags && f.hashtags.some(h => (h.tag || '').toLowerCase().includes(q)));
         if (!matchesQuery) return false;
-        if (currentFilter === 'streak') return f.streak >= 30;
-        if (currentFilter === 'night') return f.nightScore >= 75;
-        if (currentFilter === 'balanced') return f.friendRatio >= 45 && f.friendRatio <= 55;
+        if (currentFilter === 'streak') return (Number(f.activeStreak) > 0) || (Number(f.streak) >= 5) || (Number(f.bestStreak) >= 5);
+        if (currentFilter === 'night') return (Number(f.nightScore) || 0) >= 60;
+        if (currentFilter === 'balanced') return f.friendRatio >= 40 && f.friendRatio <= 60;
         return true;
       });
       renderLeaderboard(filtered);
@@ -2496,6 +2504,20 @@
     }
     window.addEventListener('online', updateOnlineBanner);
     window.addEventListener('offline', updateOnlineBanner);
+
+    // Expose core controller functions to window for live scan streams and multi-user vaults
+    window.updateGlobalBannerSummary = updateGlobalBannerSummary;
+    window.filterFriendsList = filterFriendsList;
+    window.renderLeaderboard = renderLeaderboard;
+    window.selectFriend = selectFriend;
+    window.saveFriendsToIndexedDB = saveFriendsToIndexedDB;
+    window.loadFriendsFromIndexedDB = loadFriendsFromIndexedDB;
+    window.clearAppCache = clearAppCache;
+    window.switchTab = switchTab;
+    window.showToast = showToast;
+    window.openStoryMode = openStoryMode;
+    window.closeStoryMode = closeStoryMode;
+    window.openFriendDossier = openFriendDossier;
 
     // Boot Sequence
     window.addEventListener('DOMContentLoaded', async () => {

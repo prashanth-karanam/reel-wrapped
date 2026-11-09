@@ -233,19 +233,23 @@ window.triggerGlobalCountRollup = function(durationMs = 700) {
   const list = (window.FRIENDS && window.FRIENDS.length > 0) ? window.FRIENDS : (typeof FRIENDS !== 'undefined' && FRIENDS.length ? FRIENDS : []);
   if (!list || !list.length) return;
 
-  const totalReels = list.reduce((acc, f) => acc + (f.totalReels || 0), 0);
-  const maxStreak = list.reduce((acc, f) => Math.max(acc, f.bestStreak || f.streak || 0), 0);
+  const totalReels = list.reduce((acc, f) => acc + (Number(f.totalReels) || ((Number(f.friendCount) || 0) + (Number(f.youCount) || 0)) || 0), 0);
+  const maxStreak = list.reduce((acc, f) => Math.max(acc, Number(f.bestStreak) || Number(f.streak) || 0), 0);
   const summaryEl = document.getElementById('banner-total-summary');
   const streakEl = document.getElementById('banner-peak-streak');
 
-  if (summaryEl && totalReels > 0) {
-    window.animateNumberWithLoadingSymbol(
-      summaryEl,
-      totalReels,
-      '',
-      ` Reels Exchanged across ${list.length} top friends`,
-      durationMs
-    );
+  if (summaryEl) {
+    if (totalReels > 0) {
+      window.animateNumberWithLoadingSymbol(
+        summaryEl,
+        totalReels,
+        '',
+        ` Reels Exchanged across ${list.length} top friends`,
+        durationMs
+      );
+    } else {
+      summaryEl.innerText = `Counting Reels across ${list.length} top friends... 🔄`;
+    }
   }
   if (streakEl) streakEl.innerText = `${maxStreak} Days`;
 
@@ -1197,7 +1201,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.FRIENDS = savedMap[activeUser].friends;
     window.currentFriendId = window.FRIENDS[0].id;
     closeStartLoginGate();
-  } else if (Array.isArray(window.FRIENDS) && window.FRIENDS.length > 0 && window.FRIENDS !== window.DEFAULT_FRIENDS) {
+  } else if (Array.isArray(window.FRIENDS) && window.FRIENDS.length > 0) {
     closeStartLoginGate();
   }
 
@@ -1305,6 +1309,7 @@ window.initLiveScanStream = function() {
         if (activeFriend && typeof window.selectFriend === 'function') {
           window.selectFriend(activeFriend.id);
         }
+        window.triggerGlobalCountRollup(400);
       }
     } else if (state.status === 'complete' && state.totalReels > 0) {
       if (banner) {
@@ -1357,8 +1362,8 @@ window.initLiveScanStream = function() {
   }, 2500);
 };
 
-window.triggerDeeperScan = async function() {
-  if (typeof showToast === 'function') showToast('🔄 Pinging older DM batches across all chats...');
+window.triggerDeeperScan = async function(workers = 5) {
+  if (typeof showToast === 'function') showToast(`🚀 Launching Swarm of ${workers}x parallel workers across all chats...`);
   try {
     const banner = document.getElementById('live-scan-progress-banner');
     if (banner) {
@@ -1367,16 +1372,16 @@ window.triggerDeeperScan = async function() {
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2 min-w-0">
             <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
-            <span id="live-scan-title" class="text-xs font-black text-purple-200 tracking-wide truncate">⚡ Pinging older DM history across chats...</span>
+            <span id="live-scan-title" class="text-xs font-black text-purple-200 tracking-wide truncate">⚡ High-Speed Swarm (${workers}x Workers) Active...</span>
           </div>
-          <span id="live-scan-batch-badge" class="text-[10px] font-mono font-bold bg-white/15 border border-white/20 text-pink-200 px-2.5 py-0.5 rounded-full shrink-0">Starting...</span>
+          <span id="live-scan-batch-badge" class="text-[10px] font-mono font-bold bg-white/15 border border-white/20 text-pink-200 px-2.5 py-0.5 rounded-full shrink-0">Swarm Init...</span>
         </div>
         <div class="w-full bg-black/50 rounded-full h-2 overflow-hidden p-0.5 border border-white/10">
           <div id="live-scan-progress-bar" class="brand-gradient-bg h-full rounded-full transition-all duration-300" style="width: 10%"></div>
         </div>
         <div class="flex items-center justify-between text-[11px] font-mono text-purple-100/90 pt-0.5">
-          <span id="live-scan-msg-count">Connecting to Instagram API...</span>
-          <span id="live-scan-reel-count" class="font-bold text-amber-300">Scanning...</span>
+          <span id="live-scan-msg-count">Connecting swarm to Instagram API...</span>
+          <span id="live-scan-reel-count" class="font-bold text-amber-300">Counting...</span>
         </div>
       `;
     }
@@ -1384,13 +1389,13 @@ window.triggerDeeperScan = async function() {
     const res = await fetch('/api/ig/start-deep-scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limit: 15, batches: 8, batchSize: 40 })
+      body: JSON.stringify({ limit: 15, batches: 10, batchSize: 40, workers: workers })
     });
     const data = await res.json();
     if (data.status === 'started' || data.status === 'already_running') {
       window.initLiveScanStream();
     }
   } catch (err) {
-    if (typeof showToast === 'function') showToast('⚠️ Deep scan error: ' + (err.message || err));
+    if (typeof showToast === 'function') showToast('⚠️ Swarm scan error: ' + (err.message || err));
   }
 };

@@ -561,7 +561,7 @@ function broadcastScanState(event: string, data: any) {
 
 let activeScanChild: any = null;
 
-function triggerBackgroundDeepScan(limit = 15, batches = 8, batchSize = 40): boolean {
+function triggerBackgroundDeepScan(limit = 15, batches = 10, batchSize = 40, workers = 5): boolean {
   if (currentScanState.isScanning && activeScanChild) {
     return false; // Already in progress
   }
@@ -572,7 +572,7 @@ function triggerBackgroundDeepScan(limit = 15, batches = 8, batchSize = 40): boo
     totalBatches: batches,
     scannedMessages: 0,
     totalReels: 0,
-    status: 'starting',
+    status: `Launching swarm of ${workers} concurrent batch workers...`,
     friends: currentScanState.friends && currentScanState.friends.length ? currentScanState.friends : [],
     lastUpdated: Date.now(),
   };
@@ -585,6 +585,7 @@ function triggerBackgroundDeepScan(limit = 15, batches = 8, batchSize = 40): boo
     '--limit', String(limit),
     '--batches', String(batches),
     '--batch-size', String(batchSize),
+    '--workers', String(workers),
   ], {
     windowsHide: true,
     env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
@@ -604,13 +605,14 @@ function triggerBackgroundDeepScan(limit = 15, batches = 8, batchSize = 40): boo
       try {
         const evt = JSON.parse(trimmed);
         if (evt.type === 'progress' || evt.status === 'progress') {
+          const w = evt.swarmWorkers || workers;
           currentScanState = {
             isScanning: true,
             batch: evt.batch,
             totalBatches: evt.totalBatches,
             scannedMessages: evt.scannedMessages,
             totalReels: evt.totalReels,
-            status: `Pinging older DM history across chats (Batch ${evt.batch}/${evt.totalBatches})...`,
+            status: `⚡ Swarm Wave ${evt.batch}/${evt.totalBatches} (${w}x Parallel Workers active)...`,
             friends: evt.friends || [],
             lastUpdated: Date.now(),
           };
@@ -721,10 +723,11 @@ app.get('/api/ig/live-scan-status', (_req, res) => {
 
 app.post('/api/ig/start-deep-scan', (req, res) => {
   const limit = Math.min(30, Math.max(5, Number(req.body?.limit) || 15));
-  const batches = Math.min(20, Math.max(2, Number(req.body?.batches) || 8));
+  const batches = Math.min(20, Math.max(2, Number(req.body?.batches) || 10));
   const batchSize = Math.min(100, Math.max(10, Number(req.body?.batchSize) || 40));
+  const workers = Math.min(8, Math.max(2, Number(req.body?.workers) || 5));
 
-  const started = triggerBackgroundDeepScan(limit, batches, batchSize);
+  const started = triggerBackgroundDeepScan(limit, batches, batchSize, workers);
   res.json({
     status: started ? 'started' : 'already_running',
     scanState: currentScanState,
