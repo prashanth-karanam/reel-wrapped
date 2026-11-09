@@ -199,8 +199,8 @@
 
       <!-- User Profile Avatar -->
       <button onclick="toggleModal('modal-profile')" title="User Profile" class="w-8 h-8 rounded-full brand-gradient-bg p-0.5 flex items-center justify-center transition-transform active:scale-95 shadow-sm">
-        <div class="w-full h-full rounded-full bg-slate-900 flex items-center justify-center text-white text-[10px] font-black">
-          PK
+        <div id="user-header-initials" class="w-full h-full rounded-full bg-slate-900 flex items-center justify-center text-white text-[10px] font-black">
+          RW
         </div>
       </button>
     </div>
@@ -223,7 +223,7 @@
               🔥 GLOBAL TOP 0.8% TIER
             </span>
             <h2 class="text-xl font-black mt-2 tracking-tight">You are a Reel Demigod</h2>
-            <p id="banner-total-summary" class="text-xs text-white/90 mt-0.5 font-medium">Loading your Reels data... 🔄</p>
+            <p id="banner-total-summary" class="text-xs text-white/90 mt-0.5 font-medium"><span class="inline-block animate-spin mr-1">🔄</span>Connecting swarm & counting Reels across chats...</p>
           </div>
           <button onclick="openStoryMode()" class="px-3 py-2 rounded-2xl bg-white text-slate-900 font-black text-[11px] shadow-md hover:scale-105 active:scale-95 transition-transform shrink-0 flex items-center gap-1">
             <span>🎬</span>
@@ -234,7 +234,7 @@
         <div class="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-white/20 text-center">
           <div class="bg-black/20 backdrop-blur-sm rounded-xl p-1.5">
             <span class="block text-[9px] uppercase font-bold text-white/70">Peak Streak</span>
-            <span id="banner-peak-streak" class="font-mono text-sm font-black text-amber-300">84 Days</span>
+            <span id="banner-peak-streak" class="font-mono text-sm font-black text-amber-300">-- Days</span>
           </div>
           <div class="bg-black/20 backdrop-blur-sm rounded-xl p-1.5">
             <span class="block text-[9px] uppercase font-bold text-white/70">Top Hour</span>
@@ -273,21 +273,43 @@
         </div>
       </div>
 
-      <!-- Live Background Deep Scan Banner & Continuous Progress -->
-      <div id="live-scan-progress-banner" class="hidden mb-3 p-3.5 rounded-2xl bg-gradient-to-r from-purple-950 via-slate-900 to-indigo-950 border border-purple-500/40 text-white shadow-md space-y-2.5">
-        <div class="flex items-center justify-between">
+      <!-- Live Background Swarm Scanner & Real-Time Loading Bar -->
+      <div id="live-scan-progress-banner" class="mb-4 p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-purple-950 to-indigo-950 border-2 border-purple-500/40 text-white shadow-xl space-y-3 relative overflow-hidden transition-all duration-300">
+        <div class="absolute -right-8 -top-8 w-24 h-24 bg-pink-500/20 rounded-full blur-xl pointer-events-none"></div>
+
+        <div class="flex items-center justify-between gap-2 relative z-10">
           <div class="flex items-center gap-2 min-w-0">
-            <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
-            <span id="live-scan-title" class="text-xs font-black text-purple-200 tracking-wide truncate">⚡ Live DM Deep Scan in Progress</span>
+            <span class="relative flex h-3 w-3 shrink-0">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <span id="live-scan-title" class="text-xs font-black text-purple-200 uppercase tracking-wide truncate">
+              ⚡ High-Speed Swarm Active (75 msgs/load)
+            </span>
           </div>
-          <span id="live-scan-batch-badge" class="text-[10px] font-mono font-bold bg-white/15 border border-white/20 text-pink-200 px-2.5 py-0.5 rounded-full shrink-0">Batch 1/8</span>
+          <span id="live-scan-batch-badge" class="text-[10px] font-mono font-black bg-pink-500/30 border border-pink-400/40 text-pink-200 px-2.5 py-0.5 rounded-full shrink-0 shadow-sm">
+            Wave 1/50
+          </span>
         </div>
-        <div class="w-full bg-black/50 rounded-full h-2 overflow-hidden p-0.5 border border-white/10">
-          <div id="live-scan-progress-bar" class="brand-gradient-bg h-full rounded-full transition-all duration-300" style="width: 15%"></div>
+
+        <!-- High-Visibility Dynamic Progress Line -->
+        <div class="space-y-1 relative z-10">
+          <div class="w-full bg-black/60 rounded-full h-2.5 overflow-hidden p-0.5 border border-white/20 shadow-inner">
+            <div id="live-scan-progress-bar" class="brand-gradient-bg h-full rounded-full transition-all duration-300" style="width: 8%"></div>
+          </div>
+          <div class="flex justify-between text-[10px] font-mono text-purple-200/90 px-0.5 font-bold">
+            <span id="live-scan-pct-label">Connecting swarm to DM threads...</span>
+            <span id="live-scan-speed-label">~300 msgs/sec</span>
+          </div>
         </div>
-        <div class="flex items-center justify-between text-[11px] font-mono text-purple-100/90 pt-0.5">
-          <span id="live-scan-msg-count">Pinging older messages across chats...</span>
-          <span id="live-scan-reel-count" class="font-bold text-amber-300">Counting...</span>
+
+        <div class="flex items-center justify-between text-[11px] font-mono text-purple-100 pt-1 border-t border-white/10 relative z-10">
+          <span id="live-scan-msg-count" class="flex items-center gap-1 text-purple-200">
+            <span class="inline-block animate-spin text-[10px]">🔄</span> Scanned 0 messages across chats
+          </span>
+          <span id="live-scan-reel-count" class="font-bold text-amber-300">
+            Counting reels...
+          </span>
         </div>
       </div>
 
@@ -747,7 +769,7 @@
             </button>
           </div>
 
-          <button id="btn-init-scan" onclick="runRealisticScanSimulation()" class="w-full py-2.5 px-4 rounded-xl brand-gradient-bg text-white font-black text-xs shadow-md hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2">
+          <button id="btn-init-scan" onclick="executeInstagramAuthHandshake('vault')" class="w-full py-2.5 px-4 rounded-xl brand-gradient-bg text-white font-black text-xs shadow-md hover:opacity-90 active:scale-95 transition-all flex items-center justify-center gap-2">
             <span id="init-scan-text">🔐 LOGIN &amp; SCAN LIVE INSTAGRAM DMs</span>
             <span id="init-scan-icon">→</span>
           </button>
@@ -860,7 +882,7 @@
         </div>
         <div class="p-3 rounded-2xl bg-emerald-50 border border-emerald-200/60 text-emerald-950">
           <div class="font-black text-emerald-700 mb-1">🤖 Android (Chrome / Edge)</div>
-          <p>Tap <strong>Install App</strong> in your browser menu to install the standalone APK-style WebAPK with offline IndexedDB vault.</p>
+          <p>Tap <strong>Install App</strong> in your browser menu to install the standalone Progressive Web App with offline IndexedDB vault.</p>
         </div>
       </div>
       <button onclick="toggleModal('modal-pwa-install')" class="w-full py-2.5 rounded-xl brand-gradient-bg text-white font-bold text-xs">
@@ -1394,37 +1416,111 @@
       } catch (_) {}
     }
 
-    function playTrackPreview(idx, trackTitle) {
-      ensureAudioCtx();
-      activeAudioIdx = (activeAudioIdx === idx) ? -1 : idx;
-      const f = FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0];
-      renderAudioTracks(f);
-      if (activeAudioIdx === -1) {
+    let currentGlobalAudio = null;
+    const cachedAudioPreviews = {};
+
+    async function playTrackPreview(idx, trackTitle) {
+      const f = (window.FRIENDS || []).find(x => x.id === currentFriendId) || (typeof FRIENDS !== 'undefined' ? FRIENDS[0] : null);
+      if (!f) return;
+      const trackObj = (f.audioTracks || [])[idx];
+      const artist = trackObj?.artist || '';
+
+      if (activeAudioIdx === idx && currentGlobalAudio && !currentGlobalAudio.paused) {
+        currentGlobalAudio.pause();
+        activeAudioIdx = -1;
+        renderAudioTracks(f);
         showToast('⏸ Audio preview paused');
         return;
       }
-      showToast(`🎵 Playing Synth Preview: ${trackTitle}`);
-      const scales = [
-        [261.63, 329.63, 392.00, 523.25],
-        [293.66, 349.23, 440.00, 587.33],
-        [220.00, 277.18, 329.63, 440.00]
-      ];
-      const notes = scales[idx % scales.length];
-      notes.forEach((n, step) => {
-        setTimeout(() => {
-          if (activeAudioIdx !== idx || !audioCtx) return;
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(n, audioCtx.currentTime);
-          gain.gain.setValueAtTime(0.14, audioCtx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.22);
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-          osc.start();
-          osc.stop(audioCtx.currentTime + 0.22);
-        }, step * 140);
-      });
+
+      if (currentGlobalAudio) {
+        currentGlobalAudio.pause();
+        currentGlobalAudio.src = '';
+      }
+
+      activeAudioIdx = idx;
+      renderAudioTracks(f);
+
+      // Clean track title & artist for searching iTunes Open Audio CDN
+      let cleanTitle = trackTitle
+        .replace(/Original Audio\s*•?\s*@?/i, '')
+        .replace(/\(Slowed\s*\+\s*Reverb\)/i, '')
+        .replace(/\(Remix\)/i, '')
+        .replace(/\(Speed Up\)/i, '')
+        .trim();
+      let cleanArtist = artist.replace(/^@/, '').trim();
+      if (!cleanTitle) cleanTitle = trackTitle;
+
+      const cacheKey = `${cleanTitle}_${cleanArtist}`.toLowerCase();
+      showToast(`🔍 Searching studio preview: ${trackTitle}...`);
+
+      try {
+        let streamUrl = cachedAudioPreviews[cacheKey];
+        if (!streamUrl) {
+          const query = `${cleanTitle} ${cleanArtist}`.trim();
+          const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&limit=1`;
+          const resp = await fetch(itunesUrl);
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.results && data.results.length > 0 && data.results[0].previewUrl) {
+              streamUrl = data.results[0].previewUrl;
+              cachedAudioPreviews[cacheKey] = streamUrl;
+            }
+          }
+        }
+
+        // Secondary fallback search with just the track title if no result
+        if (!streamUrl && cleanTitle && cleanTitle.length > 3) {
+          const resp2 = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle)}&media=music&limit=1`);
+          if (resp2.ok) {
+            const data2 = await resp2.json();
+            if (data2.results && data2.results.length > 0 && data2.results[0].previewUrl) {
+              streamUrl = data2.results[0].previewUrl;
+              cachedAudioPreviews[cacheKey] = streamUrl;
+            }
+          }
+        }
+
+        if (streamUrl) {
+          const audio = new Audio(streamUrl);
+          audio.volume = 0.85;
+          currentGlobalAudio = audio;
+          audio.onended = () => {
+            activeAudioIdx = -1;
+            renderAudioTracks(f);
+          };
+          audio.onerror = () => {
+            showToast('⚠️ Audio preview error');
+            activeAudioIdx = -1;
+            renderAudioTracks(f);
+          };
+          await audio.play();
+          showToast(`🎶 Playing Studio Track: ${trackTitle}`);
+        } else {
+          // Melodic harmonic synth chime if track is an unindexed custom user voiceover
+          ensureAudioCtx();
+          showToast(`🎵 Audio Sound: ${trackTitle}`);
+          const scales = [[261.63, 329.63, 392.00, 523.25], [293.66, 349.23, 440.00, 587.33]];
+          const notes = scales[idx % scales.length];
+          notes.forEach((n, step) => {
+            setTimeout(() => {
+              if (activeAudioIdx !== idx || !audioCtx) return;
+              const osc = audioCtx.createOscillator();
+              const gain = audioCtx.createGain();
+              osc.type = 'triangle';
+              osc.frequency.setValueAtTime(n, audioCtx.currentTime);
+              gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+              osc.connect(gain);
+              gain.connect(audioCtx.destination);
+              osc.start();
+              osc.stop(audioCtx.currentTime + 0.35);
+            }, step * 160);
+          });
+        }
+      } catch (err) {
+        showToast(`🎵 Audio: ${trackTitle}`);
+      }
     }
 
     // =========================================================================
@@ -1456,14 +1552,14 @@
 
       if (summaryEl) {
         if (totalReels > 0 && list.length > 0) {
-          summaryEl.innerText = `${totalReels.toLocaleString()} Reels Exchanged across ${list.length} top friends`;
+          summaryEl.innerHTML = `<span class="font-black text-white">${totalReels.toLocaleString()}</span> Reels Exchanged across ${list.length} top friends`;
         } else if (list.length > 0) {
-          summaryEl.innerText = `Counting Reels across ${list.length} top friends... 🔄`;
+          summaryEl.innerHTML = `<span class="inline-block animate-spin mr-1 text-[11px]">🔄</span>Counting Reels across ${list.length} top friends...`;
         } else {
-          summaryEl.innerText = `Counting Reels across your DM threads... 🔄`;
+          summaryEl.innerHTML = `<span class="inline-block animate-spin mr-1 text-[11px]">🔄</span>Connecting swarm & counting Reels across chats...`;
         }
       }
-      if (streakEl) streakEl.innerText = `${maxStreak} Days`;
+      if (streakEl) streakEl.innerText = maxStreak > 0 ? `${maxStreak} Days` : `-- Days`;
       if (profEl && totalReels > 0) profEl.innerText = `${totalReels.toLocaleString()} Reels`;
       if (filterAllBtn && list.length > 0) filterAllBtn.innerText = `All (${list.length})`;
     }
@@ -2098,7 +2194,24 @@
       const totalReels = FRIENDS.reduce((s, f) => s + f.totalReels, 0);
       const totalHours = Math.round((totalReels * 25) / 3600);
       const topFriend = FRIENDS[0];
-      const carrierFriend = [...FRIENDS].sort((a, b) => b.friendRatio - a.friendRatio)[0];
+
+      // Unpaid Intern Algorithm (Balanced Math & Volume Weighting):
+      // Candidate A (Them as Intern): Friend who sends you the most one-sided volume:
+      const internThemList = [...FRIENDS].filter(f => (f.friendCount || 0) >= 10 && (f.friendRatio || 0) >= 55)
+        .sort((a, b) => ((b.friendCount - b.youCount) - (a.friendCount - a.youCount)));
+      const internThem = internThemList[0] || [...FRIENDS].sort((a, b) => (b.friendCount - a.friendCount))[0] || FRIENDS[0];
+
+      // Candidate B (You as Intern): Friend you send the most one-sided volume:
+      const internYouList = [...FRIENDS].filter(f => (f.youCount || 0) >= 10 && (f.youRatio || 0) >= 55)
+        .sort((a, b) => ((b.youCount - b.friendCount) - (a.youCount - a.friendCount)));
+      const internYou = internYouList[0] || null;
+
+      // Determine the primary unpaid intern story
+      const isThem = !internYou || ((internThem.friendCount - internThem.youCount) >= (internYou.youCount - internYou.friendCount));
+      const targetIntern = isThem ? internThem : internYou;
+      const internReels = isThem ? targetIntern.friendCount : targetIntern.youCount;
+      const internHours = Math.max(1, Math.round((internReels * 45) / 3600));
+      const internRatio = isThem ? targetIntern.friendRatio : targetIntern.youRatio;
 
       if (currentStorySlide === 0) {
         bodyEl.innerHTML = `
@@ -2127,11 +2240,30 @@
         `;
       } else if (currentStorySlide === 2) {
         bodyEl.innerHTML = `
-          <span class="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-black uppercase tracking-widest mb-3">THE UNPAID INTERN AWARD</span>
-          <img src="${carrierFriend.avatar}" class="w-20 h-20 rounded-full object-cover border-2 border-amber-300 mb-3 shadow-lg">
-          <h3 class="text-2xl font-black">${carrierFriend.name}</h3>
-          <p class="text-xs text-amber-300 font-mono font-bold mt-1">Sends ${carrierFriend.friendRatio}% of all reels in your chat</p>
-          <p class="text-xs text-slate-300 mt-3">${carrierFriend.statusSubtitle} (${carrierFriend.friendCount.toLocaleString()} vs ${carrierFriend.youCount.toLocaleString()}).</p>
+          <span class="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-black uppercase tracking-widest mb-3">THE UNPAID INTERN AWARD 🏆</span>
+          <img src="${targetIntern.avatar}" class="w-20 h-20 rounded-full object-cover border-2 border-amber-300 mb-2 shadow-lg">
+          <h3 class="text-2xl font-black">${isThem ? targetIntern.name : 'You (Working Overtime)'}</h3>
+          <div class="inline-block px-2.5 py-1 rounded-lg bg-amber-400/20 text-amber-300 font-mono text-xs font-black mt-1">
+            ${isThem ? `${targetIntern.name} sends ${internRatio}% of reels` : `You send ${internRatio}% of reels to @${targetIntern.handle.replace('@', '')}`}
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 w-full mt-3 bg-white/10 p-2.5 rounded-2xl border border-white/10 text-left">
+            <div>
+              <span class="text-[9px] uppercase font-bold text-slate-400 block">Reels Delivered</span>
+              <span class="text-sm font-black font-mono text-white">${internReels.toLocaleString()} Reels</span>
+            </div>
+            <div>
+              <span class="text-[9px] uppercase font-bold text-slate-400 block">Hours on Duty</span>
+              <span class="text-sm font-black font-mono text-amber-300">${internHours}h Unpaid Work</span>
+            </div>
+            <div class="col-span-2 pt-1 border-t border-white/10 flex items-center justify-between text-[11px]">
+              <span class="text-slate-400">Compensation:</span>
+              <span class="font-mono font-bold text-emerald-400">$0.00 / hr (Pure Labor)</span>
+            </div>
+          </div>
+          <p class="text-[11px] text-slate-300 mt-2.5 italic">
+            ${isThem ? `"${targetIntern.name} single-handedly curated your entertainment feed."` : `"You worked double shifts delivering reels to ${targetIntern.name}'s DMs."`}
+          </p>
         `;
       } else if (currentStorySlide === 3) {
         bodyEl.innerHTML = `
@@ -2302,7 +2434,7 @@
       const now = Date.now();
       for (let i = 0; i < 5000; i++) {
         synthMessages.push({
-          sender_name: i % 3 === 0 ? "You" : "Karanam Syndicate \u00f0\u009f\u0094\u00a5",
+          sender_name: i % 3 === 0 ? "You" : "Reel Syndicate \u00f0\u009f\u0094\u00a5",
           timestamp_ms: now - i * 1800000,
           share: {
             link: "https://www.instagram.com/reel/C8benchmark/",
@@ -2313,7 +2445,7 @@
         });
       }
       const syntheticThread = {
-        participants: [{ name: "Karanam Syndicate \u00f0\u009f\u0094\u00a5" }, { name: "You" }],
+        participants: [{ name: "Reel Syndicate \u00f0\u009f\u0094\u00a5" }, { name: "You" }],
         messages: synthMessages
       };
 
@@ -2371,15 +2503,9 @@
     // =========================================================================
     function togglePasswordVisibility() {
       const input = document.getElementById('vault-password-input');
-      if (input.type === "password") {
-        input.type = "text";
-        input.value = "ig_ephemeral_key_99x";
-        showToast('Password Revealed (Ephemeral RAM)');
-      } else {
-        input.type = "password";
-        input.value = "••••••••••••••";
-        showToast('Password Concealed');
-      }
+      if (!input) return;
+      input.type = input.type === "password" ? "text" : "password";
+      showToast(input.type === "password" ? "Password concealed" : "Password revealed");
     }
 
     function toggleBiometrics() {
@@ -2404,35 +2530,9 @@
     }
 
     function runRealisticScanSimulation() {
-      const btn = document.getElementById('btn-init-scan');
-      const text = document.getElementById('init-scan-text');
-      const icon = document.getElementById('init-scan-icon');
-
-      btn.disabled = true;
-      btn.classList.add('opacity-80');
-      icon.innerHTML = `<span class="animate-spin inline-block">🔄</span>`;
-
-      text.innerText = "Handshaking TLS 1.3 socket...";
-      showToast("Direct connection initiated to i.instagram.com");
-
-      setTimeout(() => {
-        text.innerText = "Capturing session cookies in KeyStore...";
-        showToast("Encrypted sessionid captured in Hardware KeyStore");
-      }, 650);
-
-      setTimeout(() => {
-        text.innerText = "Running Rust/WASM Streak & XMA Classifier...";
-        showToast("WASM linear memory scan completed in 0.4ms");
-      }, 1300);
-
-      setTimeout(() => {
-        btn.disabled = false;
-        btn.classList.remove('opacity-80');
-        text.innerText = "INITIALIZE LOCAL SCAN";
-        icon.innerText = "→";
-        showToast("🎉 Scan Complete! Launching Story Reveal...");
-        openStoryMode();
-      }, 2000);
+      if (typeof window.executeInstagramAuthHandshake === 'function') {
+        window.executeInstagramAuthHandshake('vault');
+      }
     }
 
     function exportLocalJson() {

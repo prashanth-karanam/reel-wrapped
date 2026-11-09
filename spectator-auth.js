@@ -77,14 +77,65 @@ function saveUserAccountVault(username, modeLabel, friendsList) {
 
 window.switchToSavedAccount = async function(username) {
   if (typeof playUiPop === 'function') playUiPop(620);
+  const clean = String(username || '').replace(/^@/, '').trim();
+  if (!clean) return;
+
+  if (typeof showToast === 'function') {
+    showToast(`🔄 Switching account to @${clean}...`);
+  }
+
+  // 1. Notify server to switch active account namespace, session & vault
+  try {
+    const res = await fetch('/api/ig/switch-account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: clean })
+    });
+    if (res.ok) {
+      const serverData = await res.json();
+      if (serverData.status === 'ok') {
+        const friendsList = serverData.friends || [];
+        saveUserAccountVault(clean, serverData.hasSession ? 'Saved Session' : 'Offline Vault', friendsList);
+        setActiveAccountUsername(clean);
+        enrichFriendsWithPlayableStreams(friendsList);
+        window.FRIENDS = friendsList;
+        if (typeof FRIENDS !== 'undefined') FRIENDS = friendsList;
+        if (friendsList.length > 0) {
+          window.currentFriendId = friendsList[0].id;
+          if (typeof currentFriendId !== 'undefined') currentFriendId = friendsList[0].id;
+        }
+        if (typeof window.saveFriendsToIndexedDB === 'function') {
+          await window.saveFriendsToIndexedDB(friendsList);
+        }
+        if (typeof window.updateGlobalBannerSummary === 'function') window.updateGlobalBannerSummary();
+        if (typeof window.filterFriendsList === 'function') window.filterFriendsList();
+        if (friendsList.length > 0 && typeof window.selectFriend === 'function') {
+          window.selectFriend(window.currentFriendId);
+        }
+        window.triggerGlobalCountRollup(700);
+        closeStartLoginGate();
+        renderMultiUserListUI();
+        if (typeof showToast === 'function') {
+          showToast(`✅ Switched to @${clean} (${(serverData.totalReels || 0).toLocaleString()} reels, ${friendsList.length} threads)`);
+        }
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('Switch account API fallback to local storage:', e);
+  }
+
+  // Fallback to local map if server is unreachable
   const map = loadSavedAccountsMap();
-  const acct = map[username];
+  const acct = map[clean];
   if (!acct || !Array.isArray(acct.friends) || !acct.friends.length) return;
 
-  setActiveAccountUsername(username);
+  setActiveAccountUsername(clean);
   enrichFriendsWithPlayableStreams(acct.friends);
   window.FRIENDS = acct.friends;
+  if (typeof FRIENDS !== 'undefined') FRIENDS = acct.friends;
   window.currentFriendId = window.FRIENDS[0].id;
+  if (typeof currentFriendId !== 'undefined') currentFriendId = window.FRIENDS[0].id;
 
   if (typeof window.saveFriendsToIndexedDB === 'function') {
     await window.saveFriendsToIndexedDB(window.FRIENDS);
@@ -97,7 +148,7 @@ window.switchToSavedAccount = async function(username) {
   closeStartLoginGate();
   renderMultiUserListUI();
   if (typeof showToast === 'function') {
-    showToast(`👤 Switched to @${username} (${acct.totalReels.toLocaleString()} reels)`);
+    showToast(`✅ Switched to @${clean} (${acct.totalReels.toLocaleString()} reels)`);
   }
 };
 
@@ -114,16 +165,71 @@ window.removeSavedAccount = function(username, ev) {
   if (typeof showToast === 'function') showToast(`🗑️ Removed @${username} from local device`);
 };
 
+window.syncSavedAccountsFromServer = async function() {
+  try {
+    const res = await fetch('/api/ig/saved-accounts');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status === 'ok' && Array.isArray(data.accounts)) {
+        const map = loadSavedAccountsMap();
+        data.accounts.forEach(acct => {
+          if (!map[acct.username]) {
+            map[acct.username] = {
+              username: acct.username,
+              mode: acct.hasSession ? 'Saved Session' : 'Offline Vault',
+              updatedAt: new Date(acct.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              totalReels: acct.totalReels || 0,
+              threadCount: acct.friendCount || 0,
+              friends: [],
+            };
+          } else {
+            if (acct.totalReels) map[acct.username].totalReels = acct.totalReels;
+            if (acct.friendCount) map[acct.username].threadCount = acct.friendCount;
+          }
+        });
+        saveAccountsMap(map);
+        if (data.activeUser && !getActiveAccountUsername()) {
+          setActiveAccountUsername(data.activeUser);
+        }
+        renderMultiUserListUI();
+      }
+    }
+  } catch (_) {}
+};
+
+function getInitials(username) {
+  if (!username) return 'RW';
+  const clean = String(username).replace(/^@/, '').replace(/[^a-zA-Z0-9]/g, ' ').trim();
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  if (parts.length === 1 && parts[0].length >= 2) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return clean.slice(0, 2).toUpperCase() || 'RW';
+}
+
 function updateHeaderAccountBadge() {
   const active = getActiveAccountUsername() || 'demo.mode';
   const badgeBtn = document.getElementById('header-multiuser-btn');
   if (badgeBtn) {
     badgeBtn.innerHTML = `
-      <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
       <span class="truncate max-w-[95px]">@${active}</span>
       <span class="text-[9px] opacity-70">⇄</span>
     `;
   }
+  const initials = getInitials(active);
+  const userHeaderInitials = document.getElementById('user-header-initials');
+  if (userHeaderInitials) userHeaderInitials.innerText = initials;
+
+  const profileInitials = document.getElementById('profile-initials-display');
+  if (profileInitials) profileInitials.innerText = initials;
+
+  const profileHandle = document.getElementById('profile-handle-display');
+  if (profileHandle) profileHandle.innerText = `@${active}`;
+
   const profHeaders = document.querySelectorAll('#modal-profile h4');
   if (profHeaders.length > 0) profHeaders[0].innerText = `@${active}`;
 }
@@ -204,25 +310,42 @@ window.copyOneLinerCommand = function(cmdText, label) {
 };
 
 // ============================================================================
-// 2. LIVE COUNTING SYMBOL (🔄) ANIMATION ENGINE
+// 2. LIVE COUNTING SYMBOL (🔄) ANIMATION ENGINE (SMOOTH NON-ZERO ROLLUP)
 // ============================================================================
 window.animateNumberWithLoadingSymbol = function(el, targetValue, prefix = '', suffix = '', durationMs = 650) {
   if (!el) return;
   const target = Number(targetValue) || 0;
-  const startTime = performance.now();
-
   if (el._countAnimFrame) cancelAnimationFrame(el._countAnimFrame);
 
+  // Read current numeric value so we never reset/drop to 0 on re-scans!
+  let startVal = typeof el._currentNumericVal === 'number'
+    ? el._currentNumericVal
+    : (parseInt((el.innerText || '').replace(/[^0-9]/g, '')) || 0);
+
+  // If startVal is 0 and target is non-zero, start slightly below target for a quick roll-up
+  if (startVal === 0 && target > 0) {
+    startVal = Math.max(0, target - Math.min(150, Math.round(target * 0.1)));
+  }
+  if (startVal > target) startVal = target;
+  if (startVal === target) {
+    el._currentNumericVal = target;
+    el.innerHTML = `${prefix}${target.toLocaleString()}${suffix}`;
+    return;
+  }
+
+  const startTime = performance.now();
   function tick(now) {
     const elapsed = now - startTime;
     const progress = Math.min(1, elapsed / durationMs);
     const eased = 1 - Math.pow(1 - progress, 3);
-    const current = Math.round(target * eased);
+    const current = Math.round(startVal + (target - startVal) * eased);
+    el._currentNumericVal = current;
 
     if (progress < 1) {
       el.innerHTML = `<span class="inline-block animate-spin text-[11px] mr-1 opacity-90">🔄</span>${prefix}${current.toLocaleString()}${suffix}`;
       el._countAnimFrame = requestAnimationFrame(tick);
     } else {
+      el._currentNumericVal = target;
       el.innerHTML = `${prefix}${target.toLocaleString()}${suffix}`;
     }
   }
@@ -248,10 +371,10 @@ window.triggerGlobalCountRollup = function(durationMs = 700) {
         durationMs
       );
     } else {
-      summaryEl.innerText = `Counting Reels across ${list.length} top friends... 🔄`;
+      summaryEl.innerHTML = `<span class="inline-block animate-spin text-[11px] mr-1">🔄</span>Counting Reels across ${list.length} top friends...`;
     }
   }
-  if (streakEl) streakEl.innerText = `${maxStreak} Days`;
+  if (streakEl) streakEl.innerText = maxStreak > 0 ? `${maxStreak} Days` : `-- Days`;
 
   const f = list.find(x => x.id === window.currentFriendId) || list[0];
   if (f) {
@@ -462,10 +585,20 @@ window.openInAppReelSpectator = function(friendId, msgIndex = 0) {
 };
 
 window.closeInAppReelSpectator = function() {
+  if (currentReelAbortController) {
+    try { currentReelAbortController.abort(); } catch (_) {}
+    currentReelAbortController = null;
+  }
   const video = document.getElementById('spectator-video');
   if (video) {
     video.pause();
     video.removeAttribute('src');
+    video.load();
+  }
+  const iframe = document.getElementById('spectator-iframe');
+  if (iframe) {
+    iframe.src = 'about:blank';
+    iframe.classList.add('hidden');
   }
   const modal = document.getElementById('modal-reel-spectator');
   if (modal) modal.classList.add('hidden');
@@ -496,18 +629,23 @@ window.toggleSpectatorMute = function() {
   if (btn) btn.innerText = spectatorMuted ? '🔇 Muted' : '🔊 Audio On';
 };
 
-function renderSpectatorReel() {
+let currentReelAbortController = null;
+
+async function renderSpectatorReel() {
   const f = FRIENDS.find(x => x.id === spectatorFriendId) || FRIENDS[0];
   const reels = getPlayableReelItems(f);
   const item = reels[spectatorReelIdx] || reels[0];
 
   const video = document.getElementById('spectator-video');
+  const iframe = document.getElementById('spectator-iframe');
+  const loadingEl = document.getElementById('spectator-loading');
   const creatorEl = document.getElementById('spectator-creator');
   const senderEl = document.getElementById('spectator-sender');
   const captionEl = document.getElementById('spectator-caption');
   const counterEl = document.getElementById('spectator-counter');
   const friendAvatarEl = document.getElementById('spectator-friend-avatar');
   const friendNameEl = document.getElementById('spectator-friend-name');
+  const igLink = document.getElementById('spectator-ig-link');
 
   if (friendAvatarEl) friendAvatarEl.src = f.avatar;
   if (friendNameEl) friendNameEl.innerText = `${f.name} (${f.handle})`;
@@ -516,21 +654,85 @@ function renderSpectatorReel() {
   if (captionEl) captionEl.innerText = item.caption || item.text_or_url || 'Shared via Instagram Direct';
   if (counterEl) counterEl.innerText = `Reel ${spectatorReelIdx + 1} of ${reels.length}`;
 
-  let rawVideoUrl = item.video_url || IN_APP_REEL_STREAMS[spectatorReelIdx % IN_APP_REEL_STREAMS.length];
-  if (rawVideoUrl && (rawVideoUrl.includes('cdninstagram.com') || rawVideoUrl.includes('fbcdn.net'))) {
-    rawVideoUrl = `/api/ig/media-proxy?url=${encodeURIComponent(rawVideoUrl)}`;
+  const targetUrl = item.text_or_url || item.reel_url || (item.shortcode ? `https://www.instagram.com/reel/${item.shortcode}/` : '');
+  if (igLink && targetUrl) {
+    igLink.href = targetUrl;
   }
 
-  if (video) {
+  if (loadingEl) loadingEl.classList.remove('hidden');
+
+  // Cancel any prior in-flight fetch
+  if (currentReelAbortController) {
+    try { currentReelAbortController.abort(); } catch (_) {}
+  }
+  currentReelAbortController = new AbortController();
+
+  let shortcode = item.shortcode || '';
+  if (!shortcode && targetUrl) {
+    const m = targetUrl.match(/\/(?:reel|reels|p)\/([A-Za-z0-9_-]+)/);
+    if (m) shortcode = m[1];
+  }
+
+  // Dual-Engine Resolution:
+  // Engine 1: On-Demand authenticated direct MP4 streaming via backend /api/ig/reel-video
+  // Engine 2: Instant Instagram official embed iframe fallback with zero black screen
+  let directUrl = item.video_url || '';
+  let embedUrl = shortcode ? `https://www.instagram.com/reel/${shortcode}/embed/` : '';
+
+  try {
+    if (targetUrl || shortcode) {
+      const q = new URLSearchParams();
+      if (targetUrl) q.set('url', targetUrl);
+      if (shortcode) q.set('shortcode', shortcode);
+      const res = await fetch(`/api/ig/reel-video?${q.toString()}`, { signal: currentReelAbortController.signal });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.directUrl) directUrl = data.directUrl;
+        if (data.embedUrl) embedUrl = data.embedUrl;
+        if (data.shortcode && !shortcode) shortcode = data.shortcode;
+      }
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+  }
+
+  if (loadingEl) loadingEl.classList.add('hidden');
+
+  if (directUrl && video) {
+    if (iframe) iframe.classList.add('hidden');
+    video.classList.remove('hidden');
     video.muted = spectatorMuted;
-    video.src = rawVideoUrl;
+    video.src = directUrl;
+
+    video.onerror = () => {
+      // Fallback to Engine 2 (Embed iframe) if direct CDN link throws format or token error
+      if (embedUrl && iframe) {
+        video.classList.add('hidden');
+        iframe.classList.remove('hidden');
+        iframe.src = embedUrl;
+      }
+    };
+
     video.play().catch(() => {
       video.muted = true;
       spectatorMuted = true;
       const btn = document.getElementById('spectator-mute-btn');
       if (btn) btn.innerText = '🔇 Tap for Audio';
-      video.play().catch(() => {});
+      video.play().catch(() => {
+        if (embedUrl && iframe) {
+          video.classList.add('hidden');
+          iframe.classList.remove('hidden');
+          iframe.src = embedUrl;
+        }
+      });
     });
+  } else if (embedUrl && iframe) {
+    if (video) {
+      video.pause();
+      video.classList.add('hidden');
+    }
+    iframe.classList.remove('hidden');
+    iframe.src = embedUrl;
   }
 }
 
@@ -599,7 +801,7 @@ async function playLiveThreadCountingProgress(friendsList, statusEl, username) {
 }
 
 async function applyLiveScanSuccess(data, statusEl) {
-  const uname = data.user?.username || 'instagram_user';
+  const uname = data.user?.username || data.username || 'instagram_user';
   if (Array.isArray(data.friends) && data.friends.length > 0) {
     enrichFriendsWithPlayableStreams(data.friends);
     await playLiveThreadCountingProgress(data.friends, statusEl, uname);
@@ -624,7 +826,36 @@ async function applyLiveScanSuccess(data, statusEl) {
       showToast(`🎉 Loaded ${FRIENDS.length} REAL DM threads (${total.toLocaleString()} reels) for @${uname}!`);
     }
   } else {
-    if (typeof showToast === 'function') showToast('✓ Authenticated! No DM threads returned.');
+    // Fast login mode (scan is running in background swarm)
+    setActiveAccountUsername(uname);
+    closeStartLoginGate();
+    if (typeof switchTab === 'function') switchTab('tab-leaderboard');
+    window.initLiveScanStream();
+
+    const banner = document.getElementById('live-scan-progress-banner');
+    if (banner) {
+      banner.classList.remove('hidden');
+      banner.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
+            <span class="text-xs font-black text-purple-200 tracking-wide truncate">⚡ Swarm Scanner Active for @${uname}...</span>
+          </div>
+          <span class="text-[10px] font-mono font-bold bg-white/15 border border-white/20 text-pink-200 px-2.5 py-0.5 rounded-full shrink-0">Pinging Chats...</span>
+        </div>
+        <div class="w-full bg-black/50 rounded-full h-2 overflow-hidden p-0.5 border border-white/10 mt-1">
+          <div class="brand-gradient-bg h-full rounded-full transition-all duration-300" style="width: 15%"></div>
+        </div>
+        <div class="flex items-center justify-between text-[11px] font-mono text-purple-100/90 pt-0.5">
+          <span>Pinging DM threads via 5x parallel workers...</span>
+          <span class="font-bold text-amber-300">Counting live 🔄</span>
+        </div>
+      `;
+    }
+
+    if (typeof showToast === 'function') {
+      showToast(`🚀 Authenticated as @${uname}! Swarm scanning all chats...`);
+    }
   }
 }
 
@@ -850,7 +1081,7 @@ window.executeInstagramAuthHandshake = async function(sourcePrefix = 'vault') {
         <div class="p-3 rounded-xl bg-amber-950/80 border border-amber-500/40 text-amber-200 text-xs text-left space-y-1">
           <div class="font-bold text-amber-300">⚡ Web Static Preview Detected</div>
           <p class="text-[11px] text-amber-200/80">
-            Direct Instagram login requires a local backend. Run Reel Wrapped on your PC at <strong>http://localhost:3000</strong>, install the <strong>Android APK</strong>, or explore in <strong>Demo Mode</strong> right now!
+            Direct Instagram login requires a local backend. Run Reel Wrapped on your PC at <strong>http://localhost:3000</strong> or explore in <strong>Demo Mode</strong> right now!
           </p>
         </div>
       `;
@@ -991,10 +1222,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   // 4. Inject Start-of-App Multi-User Login Gate, 9:16 Spectator Modal & 2FA Modal
-  const winCmd = `irm https://raw.githubusercontent.com/prashanth-karanam/reel-wrapped/main/install.ps1 | iex`;
-  const macCmd = `curl -fsSL https://raw.githubusercontent.com/prashanth-karanam/reel-wrapped/main/install.sh | bash`;
-  const elecCmd = `git clone https://github.com/prashanth-karanam/reel-wrapped && cd reel-wrapped && npm i && npm run electron`;
-  const gitPushCmd = `mkdir -p reel-wrapped-clean && tar -xzf reel-wrapped-v2.4-clean.tar.gz -C reel-wrapped-clean && cd reel-wrapped-clean && git init -b main && git add -A && git commit -m "feat: Reel Wrapped v2.4 (Multi-User Login, In-App 9:16 Spectator, Rust/WASM, Localhost/Electron & APK)" && git remote add origin https://github.com/prashanth-karanam/reel-wrapped.git && git push -u origin main --force`;
+  const winCmd = `npm run dev`;
+  const macCmd = `npm run dev`;
+  const elecCmd = `npm run electron`;
+  const gitPushCmd = `git push origin main`;
 
   const modalsHtml = `
     <!-- START-OF-APP MULTI-USER LOGIN & LAUNCHER GATE -->
@@ -1115,11 +1346,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
               <!-- Clean Repo Download & Releases -->
               <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
-                <a href="/api/download-clean-repo" download="reel-wrapped-v2.4-clean.tar.gz" class="text-purple-600 font-bold hover:underline">
+                <a href="/api/download-clean-repo" download="reel-wrapped-clean.tar.gz" class="text-purple-600 font-bold hover:underline">
                   📦 Download Clean Repo (.tar.gz)
                 </a>
-                <a href="https://github.com/prashanth-karanam/reel-wrapped/releases" target="_blank" rel="noopener noreferrer" class="text-emerald-600 font-bold hover:underline">
-                  📲 Download Android APK ↗
+                <a href="http://localhost:3000" class="text-emerald-600 font-bold hover:underline">
+                  🌐 Pure Web Application (localhost:3000)
                 </a>
               </div>
             </div>
@@ -1132,7 +1363,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     <div id="modal-reel-spectator" class="fixed inset-0 z-50 bg-black/90 backdrop-blur-md hidden flex items-center justify-center p-2 sm:p-4">
       <div class="w-full max-w-[360px] h-[650px] rounded-3xl overflow-hidden shadow-2xl border border-white/20 bg-black text-white flex flex-col justify-between relative select-none">
         <video id="spectator-video" class="absolute inset-0 w-full h-full object-cover bg-slate-950" playsinline autoplay loop></video>
-        <div class="absolute inset-0 bg-gradient-to-b from-black/75 via-transparent to-black/85 pointer-events-none"></div>
+        <iframe id="spectator-iframe" class="absolute inset-0 w-full h-full object-cover border-0 hidden bg-black" allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share" scrolling="no"></iframe>
+        <div id="spectator-loading" class="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-10 hidden transition-opacity">
+          <div class="w-10 h-10 border-4 border-pink-500 border-t-transparent rounded-full animate-spin"></div>
+          <span class="text-xs font-mono font-bold text-slate-300 mt-2">Connecting Reel Stream...</span>
+        </div>
+        <div class="absolute inset-0 bg-gradient-to-b from-black/75 via-transparent to-black/85 pointer-events-none z-10"></div>
 
         <div class="relative z-20 p-3.5 flex items-center justify-between">
           <div class="flex items-center gap-2 min-w-0">
@@ -1140,7 +1376,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             <div class="min-w-0">
               <div id="spectator-friend-name" class="text-xs font-black truncate">Friend</div>
               <span class="inline-block px-2 py-0.2 rounded-full text-[9px] font-mono font-black bg-emerald-500/30 text-emerald-300 border border-emerald-400/40">
-                👻 IN-APP SPECTATOR • READ RECEIPT BLOCKED
+                👻 IN-APP SPECTATOR • ZERO BLACK SCREEN
               </span>
             </div>
           </div>
@@ -1150,10 +1386,15 @@ window.addEventListener('DOMContentLoaded', async () => {
         <div class="relative z-20 p-4 space-y-3">
           <div class="space-y-1">
             <div class="flex items-center justify-between">
-              <span id="spectator-creator" class="text-sm font-black text-amber-300 font-mono">@creator</span>
-              <button id="spectator-mute-btn" type="button" onclick="toggleSpectatorMute()" class="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[10px] font-bold">
-                🔊 Audio On
-              </button>
+              <span id="spectator-creator" class="text-sm font-black text-amber-300 font-mono truncate mr-2">@creator</span>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <a id="spectator-ig-link" href="#" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded-full bg-pink-500/30 border border-pink-400/40 text-[10px] font-black text-pink-200 hover:bg-pink-500/50">
+                  IG ↗
+                </a>
+                <button id="spectator-mute-btn" type="button" onclick="toggleSpectatorMute()" class="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[10px] font-bold">
+                  🔊 Audio On
+                </button>
+              </div>
             </div>
             <p id="spectator-caption" class="text-xs text-white/90 line-clamp-2 leading-snug"></p>
             <p id="spectator-sender" class="text-[10px] font-mono text-emerald-300/90"></p>
@@ -1208,7 +1449,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   const activeFriend = FRIENDS.find(x => x.id === window.currentFriendId) || FRIENDS[0];
   if (activeFriend) window.renderGhostRadar(activeFriend);
   if (typeof window.filterFriendsList === 'function') window.filterFriendsList();
+  if (typeof window.updateGlobalBannerSummary === 'function') window.updateGlobalBannerSummary();
   window.triggerGlobalCountRollup(650);
+
+  // Re-trigger banner after a beat in case /api/friends is still loading
+  setTimeout(() => {
+    if (typeof window.updateGlobalBannerSummary === 'function') window.updateGlobalBannerSummary();
+    window.triggerGlobalCountRollup(400);
+  }, 1500);
 
   // Check if server has an active saved session on device (e.g. from local toolkit)
   try {
@@ -1262,13 +1510,16 @@ window.addEventListener('DOMContentLoaded', async () => {
           `;
         }
 
-        const uInput = document.getElementById('start-username-input');
-        if (uInput && !uInput.value) uInput.value = savedData.username;
-        const vuInput = document.getElementById('vault-username-input');
-        if (vuInput && !vuInput.value) vuInput.value = savedData.username;
+        // Do not auto-fill username inputs so anyone can type their own username
       }
     }
   } catch (_) {}
+
+  // Sync multi-user accounts from server and update header
+  if (typeof window.syncSavedAccountsFromServer === 'function') {
+    try { await window.syncSavedAccountsFromServer(); } catch (_) {}
+  }
+  updateHeaderAccountBadge();
 
   // Initialize live background deep-scan stream
   window.initLiveScanStream();
@@ -1290,14 +1541,20 @@ window.initLiveScanStream = function() {
 
   function updateLiveScanUI(state) {
     if (!state) return;
+    const currentActive = getActiveAccountUsername();
+    if (state.activeUser && currentActive && state.activeUser.toLowerCase() !== currentActive.toLowerCase()) {
+      return; // Ignore events from other accounts
+    }
     if (state.isScanning) {
       if (banner) banner.classList.remove('hidden');
-      if (titleEl) titleEl.innerText = state.status || '⚡ Pinging older DM history across chats...';
-      if (batchEl) batchEl.innerText = `Batch ${state.batch || 1}/${state.totalBatches || 8}`;
-      const pct = Math.min(100, Math.max(8, Math.round(((state.batch || 1) / (state.totalBatches || 8)) * 100)));
+      if (titleEl) titleEl.innerHTML = `<span class="inline-block animate-spin text-xs mr-1">⚡</span>Swarm Active: Wave ${state.batch || 1}/${state.totalBatches || 50} (${state.swarmWorkers || 4}x parallel workers)`;
+      if (batchEl) batchEl.innerText = `Wave ${state.batch || 1}/${state.totalBatches || 50}`;
+      const pct = Math.min(100, Math.max(6, Math.round(((state.batch || 1) / (state.totalBatches || 50)) * 100)));
       if (barEl) barEl.style.width = `${pct}%`;
-      if (msgCountEl) msgCountEl.innerText = `Scanned ${(state.scannedMessages || 0).toLocaleString()} messages across chats`;
-      if (reelCountEl) reelCountEl.innerText = `${(state.totalReels || 0).toLocaleString()} reels found`;
+      const pctLabel = document.getElementById('live-scan-pct-label');
+      if (pctLabel) pctLabel.innerText = `Wave ${state.batch || 1} of ${state.totalBatches || 50} (${pct}% complete)`;
+      if (msgCountEl) msgCountEl.innerHTML = `<span class="inline-block animate-spin text-[10px]">🔄</span> Scanned ${(state.scannedMessages || 0).toLocaleString()} messages (75 msgs/load)`;
+      if (reelCountEl) reelCountEl.innerText = `${(state.totalReels || 0).toLocaleString()} reels cataloged`;
 
       if (Array.isArray(state.friends) && state.friends.length > 0) {
         enrichFriendsWithPlayableStreams(state.friends);
@@ -1317,15 +1574,15 @@ window.initLiveScanStream = function() {
         banner.innerHTML = `
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <span class="text-emerald-400 font-bold">✅</span>
-              <span class="text-xs font-black text-emerald-200 uppercase tracking-wider">100% Deep-Scan Synced</span>
+              <span class="text-emerald-400 font-bold text-sm">✅</span>
+              <div>
+                <span class="text-xs font-black text-emerald-200 uppercase tracking-wider block">100% Swarm Scan Complete</span>
+                <span class="text-[10px] text-purple-200/80 font-mono">${(state.scannedMessages || 0).toLocaleString()} msgs scanned • ${(state.totalReels || 0).toLocaleString()} reels cataloged</span>
+              </div>
             </div>
-            <button type="button" onclick="window.triggerDeeperScan()" class="px-2.5 py-1 rounded-lg brand-gradient-bg text-white text-[10px] font-black shadow hover:opacity-95 transition-all">
-              🔄 Scan Deeper (+40 msgs)
+            <button type="button" onclick="window.triggerDeeperScan(4)" class="px-3 py-1.5 rounded-xl brand-gradient-bg text-white text-[10px] font-black shadow-md hover:scale-105 active:scale-95 transition-all">
+              ⚡ Scan Deeper (+50 waves)
             </button>
-          </div>
-          <div class="text-[11px] font-mono text-purple-200">
-            Fully scanned ${(state.scannedMessages || 0).toLocaleString()} messages • ${(state.totalReels || 0).toLocaleString()} reels cataloged across ${(state.friends || []).length} friends
           </div>
         `;
       }
@@ -1360,10 +1617,24 @@ window.initLiveScanStream = function() {
       }
     } catch (_) {}
   }, 2500);
+
+  // Auto-launch swarm deep scan on authenticated page load if not running
+  fetch('/api/ig/live-scan-status')
+    .then(r => r.json())
+    .then(st => {
+      if (!st.isScanning) {
+        fetch('/api/ig/start-deep-scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 20, batches: 50, batchSize: 75, workers: 4 })
+        }).catch(() => {});
+      }
+    })
+    .catch(() => {});
 };
 
-window.triggerDeeperScan = async function(workers = 5) {
-  if (typeof showToast === 'function') showToast(`🚀 Launching Swarm of ${workers}x parallel workers across all chats...`);
+window.triggerDeeperScan = async function(workers = 4) {
+  if (typeof showToast === 'function') showToast(`🚀 Launching Swarm of ${workers}x parallel workers across all chats (75 msgs/load)...`);
   try {
     const banner = document.getElementById('live-scan-progress-banner');
     if (banner) {
@@ -1389,7 +1660,7 @@ window.triggerDeeperScan = async function(workers = 5) {
     const res = await fetch('/api/ig/start-deep-scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limit: 15, batches: 10, batchSize: 40, workers: workers })
+      body: JSON.stringify({ limit: 20, batches: 50, batchSize: 75, workers: workers })
     });
     const data = await res.json();
     if (data.status === 'started' || data.status === 'already_running') {

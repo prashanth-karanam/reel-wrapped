@@ -81,7 +81,7 @@ def parse_timestamp(ts) -> datetime.datetime:
 
 def is_reel(item: dict) -> bool:
     itype = str(item.get("item_type", "")).lower()
-    if itype in ("clip", "xma_clip", "felix_share"):
+    if itype in ("clip", "xma_clip", "felix_share", "reel_share"):
         return True
     if itype in ("media_share", "xma_media_share"):
         xma_list = item.get("xma_media_share") or item.get("xma") or []
@@ -95,10 +95,16 @@ def is_reel(item: dict) -> bool:
             prod_type = str(x0.get("product_type", "")).lower()
             if "clip" in prod_type or "reel" in prod_type:
                 return True
+            return True
         media = item.get("media_share") or item.get("clip") or {}
-        if media.get("media_type") == 2:
+        if media.get("media_type") == 2 or media.get("product_type") == "clips":
             return True
         if "/reel/" in str(item.get("target_url", "")).lower():
+            return True
+        return True
+    if itype == "link":
+        url = str(item.get("link", {}).get("text", "")).lower()
+        if "/reel/" in url or "/reels/" in url:
             return True
     return False
 
@@ -183,10 +189,12 @@ def get_creator_niche(handle: str, caption: str = "") -> str:
 
 
 def extract_reel_metadata(item: dict) -> dict:
-    """Extracts authentic creator handle, avatar, url, caption, audio, and hashtag candidates."""
+    """Extracts authentic creator handle, avatar, url, shortcode, video_url, caption, audio, and hashtag candidates."""
     creator = "viral.creator"
     creator_avatar = ""
     reel_url = "https://instagram.com/reels/"
+    shortcode = ""
+    video_url = ""
     caption = ""
     audio_title = ""
     audio_artist = ""
@@ -206,6 +214,8 @@ def extract_reel_metadata(item: dict) -> dict:
                 u = x0.get("target_url")
                 if u:
                     reel_url = str(u)
+                if x0.get("playable_url"):
+                    video_url = str(x0.get("playable_url"))
                 cap = x0.get("caption_body_text") or x0.get("title_text")
                 if cap and cap != "Message unavailable":
                     caption = str(cap)
@@ -227,6 +237,11 @@ def extract_reel_metadata(item: dict) -> dict:
                 creator = u_dict.get("username")
             if u_dict.get("profile_pic_url"):
                 creator_avatar = u_dict.get("profile_pic_url")
+            if val.get("code"):
+                shortcode = str(val.get("code"))
+                reel_url = f"https://www.instagram.com/reel/{shortcode}/"
+            if val.get("video_url"):
+                video_url = str(val.get("video_url"))
             cap_dict = val.get("caption") or {}
             if cap_dict.get("text"):
                 caption = cap_dict.get("text")
@@ -245,6 +260,11 @@ def extract_reel_metadata(item: dict) -> dict:
     if not caption and item.get("text"):
         caption = str(item.get("text"))
 
+    if not shortcode and reel_url:
+        m = re.search(r'/(?:reel|reels|p)/([A-Za-z0-9_-]+)', reel_url)
+        if m:
+            shortcode = m.group(1)
+
     if not audio_title and creator != "viral.creator":
         audio_title = f"Original Audio • @{creator}"
         audio_artist = f"@{creator}"
@@ -253,6 +273,8 @@ def extract_reel_metadata(item: dict) -> dict:
         "creator": creator,
         "creator_avatar": creator_avatar,
         "reel_url": reel_url,
+        "shortcode": shortcode,
+        "video_url": video_url,
         "caption": caption,
         "audio_title": audio_title or "Trending Reel Sound",
         "audio_artist": audio_artist or "Instagram Reels",
@@ -383,12 +405,13 @@ def enrich_friend_dossier(state, total, friend_idx):
             "rank": i,
             "handle": f"@{clean_c}",
             "count": cnt,
-            "avatar": state["creator_avatars"].get(c, "") or "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
+            "avatar": state["creator_avatars"].get(c, "") or f"https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80",
             "tag": get_creator_niche(c),
             "pct": f"{int(round((cnt / max(1, total)) * 100))}%"
         })
         seen_handles.add(clean_c.lower())
 
+    # Ensure Top 5 Shared Creators
     pool = NICHE_CREATOR_POOLS.get(detected_niche, NICHE_CREATOR_POOLS["Dark Humor & Satire"])
     for handle, av, tag in pool:
         if len(top_creators) >= 5:
@@ -408,20 +431,22 @@ def enrich_friend_dossier(state, total, friend_idx):
         })
         seen_handles.add(h_clean)
 
+    # Top 5 Viral Audio Tracks
     top_audio = []
     seen_titles = set()
-    for (title, artist), cnt in state["audio_counter"].most_common(3):
+    for (title, artist), cnt in state["audio_counter"].most_common(5):
         if title and title != "Trending Reel Sound":
             top_audio.append({
                 "title": title,
-                "artist": artist,
+                "artist": artist or "Instagram Creator Audio",
                 "count": cnt
             })
             seen_titles.add(title.lower())
 
+    # Ensure Top 5 Viral Sound Tracks
     audio_pool = NICHE_AUDIO_POOLS.get(detected_niche, NICHE_AUDIO_POOLS["Dark Humor & Satire"])
     for title, artist in audio_pool:
-        if len(top_audio) >= 3:
+        if len(top_audio) >= 5:
             break
         if title.lower() in seen_titles:
             continue
@@ -436,7 +461,7 @@ def enrich_friend_dossier(state, total, friend_idx):
     return detected_niche, top_creators, top_audio
 
 
-def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50, batch_size: int = 40, workers: int = 4):
+def stream_progressive_scan(cl: Client, max_threads: int = 20, batches: int = 50, batch_size: int = 75, workers: int = 4, target_user: str = ""):
     """
     Pings all conversations in parallel progressive swarm waves until inbox ends.
     Uses bounded concurrent worker threads with safe jitter and adaptive backoff.
@@ -447,7 +472,7 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50
     my_pk = str(cl.user_id)
     now = datetime.datetime.now()
 
-    active_user = getattr(cl, "username", "") or (USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else f"user_{cl.user_id}")
+    active_user = target_user or getattr(cl, "username", "") or (USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else f"user_{cl.user_id}")
     safe_uname = "".join(c for c in active_user if c.isalnum() or c in ("_", ".")).lower() if active_user else "default_user"
     checkpoint_file = CHECKPOINTS_DIR / f"{safe_uname}.json"
 
@@ -463,9 +488,10 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50
         inbox = cl.private_request(f"direct_v2/inbox/?limit={max_threads}")
         raw_threads = inbox.get("inbox", {}).get("threads", [])
     except Exception as e:
-        if VAULT_JSON_FILE.exists():
+        user_vault = VAULTS_DIR / f"{safe_uname}.json"
+        if user_vault.exists():
             try:
-                cached = json.loads(VAULT_JSON_FILE.read_text(encoding="utf-8"))
+                cached = json.loads(user_vault.read_text(encoding="utf-8"))
                 print(json.dumps({"type": "complete", "scannedMessages": 0, "totalReels": sum(x.get("totalReels", 0) for x in cached), "friends": cached}))
                 return
             except Exception:
@@ -516,12 +542,12 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50
             "emoji_counter": Counter(prior.get("emoji_counter", {})),
             "creator_counter": Counter(prior.get("creator_counter", {})),
             "creator_avatars": prior.get("creator_avatars", {}),
-            "audio_counter": Counter({(a[0], a[1]): c for a, c in prior.get("audio_counter_list", [])}),
+            "audio_counter": Counter({(row[0], row[1]): row[2] for row in prior.get("audio_counter_list", []) if isinstance(row, (list, tuple)) and len(row) >= 3}),
             "hashtag_counter": Counter(prior.get("hashtag_counter", {})),
             "ghost_messages": prior.get("ghost_messages", []),
             "reflex_deltas": prior.get("reflex_deltas", []),
             "cursor": prior.get("cursor", None),
-            "exhausted": prior.get("exhausted", False),
+            "exhausted": False if prior.get("cursor") else prior.get("exhausted", False),
             "total_msgs_scanned": prior.get("total_msgs_scanned", 0),
             "seen_ids": prior_seen_ids,
         }
@@ -539,26 +565,107 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50
                 th = res.get("thread", {})
                 items = th.get("items", [])
                 oldest = th.get("oldest_cursor")
-                has_older = th.get("has_older", False)
-                return t_id, items, oldest, has_older, None
+                return t_id, items, oldest, None
             except FeedbackRequired:
                 time.sleep(2.0 * (attempt + 1))
             except ClientConnectionError:
                 time.sleep(0.5)
             except Exception as e:
                 if attempt == 2:
-                    return t_id, [], None, False, e
+                    return t_id, [], None, e
                 time.sleep(0.3)
-        return t_id, [], None, False, None
+        return t_id, [], None, None
+
+    def build_current_dossiers():
+        out = []
+        for friend_idx, state in enumerate(thread_states.values()):
+            total = state["sent"] + state["rcvd"]
+            if total == 0:
+                continue
+
+            f_ratio = int(round((state["rcvd"] / total) * 100))
+            y_ratio = 100 - f_ratio
+            active_streak, best_streak, streak_label = compute_streaks(state["daily_dates"])
+
+            hourly = state["hourly"]
+            night_reels = sum(hourly[0:5]) + hourly[23]
+            night_score = min(99, max(15, int(round((night_reels / total) * 180))))
+
+            reflexes = state["reflex_deltas"]
+            med_reflex = int(sorted(reflexes)[len(reflexes) // 2]) if reflexes else 42
+            reflex_str = f"⚡ {med_reflex}s Avg Reaction" if med_reflex < 60 else f"☕ {max(1, med_reflex // 60)}m Mindful Viewer"
+
+            top_emojis = [{"emoji": e, "count": c} for e, c in state["emoji_counter"].most_common(3)] or [
+                {"emoji": "💀", "count": max(5, total // 4)},
+                {"emoji": "😭", "count": max(3, total // 6)},
+                {"emoji": "🔥", "count": max(2, total // 8)},
+            ]
+
+            detected_niche, top_creators, top_audio = enrich_friend_dossier(state, total, friend_idx)
+
+            top_tags = []
+            for tag, cnt in state["hashtag_counter"].most_common(4):
+                top_tags.append({"tag": tag, "count": cnt, "pct": f"{int(round((cnt / max(1, total)) * 100))}%"})
+            if not top_tags and top_creators:
+                top_tags = [
+                    {"tag": f"#{c['handle'].lstrip('@')}", "count": c['count'], "pct": f"{int(round((c['count'] / max(1, total)) * 100))}%"}
+                    for c in top_creators[:3]
+                ] + [{"tag": "#reels", "count": total, "pct": "100%"}]
+
+            primary_role = "UNHINGED 3 AM CURATORS" if night_score >= 75 else ("SYMMETRICAL ARCHIVIST" if 45 <= f_ratio <= 55 else ("CONTENT BROADCASTER 📢" if y_ratio >= 65 else "CONTENT CONSUMER 🍿"))
+
+            out.append({
+                "id": state["id"],
+                "rank": 0,
+                "name": state["name"],
+                "handle": state["handle"],
+                "avatar": state["avatar"],
+                "totalReels": total,
+                "streak": active_streak if active_streak > 0 else best_streak,
+                "activeStreak": active_streak,
+                "bestStreak": best_streak,
+                "streakLabel": streak_label,
+                "friendRatio": f_ratio,
+                "youRatio": y_ratio,
+                "friendCount": state["rcvd"],
+                "youCount": state["sent"],
+                "statusTag": "BALANCED" if 45 <= f_ratio <= 55 else ("ACTIVE" if total > 20 else "MUTUAL"),
+                "primaryRole": primary_role,
+                "statusSubtitle": f"{state['name'].split()[0]} sends {state['rcvd'] / max(1, state['sent']):.1f}x more reels" if state["rcvd"] >= state["sent"] else f"You send {state['sent'] / max(1, state['rcvd']):.1f}x more reels",
+                "nightScore": night_score,
+                "nightTitle": "Certified 3 AM Doomscroll Duo" if night_score >= 75 else "Evening Reel Syndicate",
+                "nightDesc": f"{night_score}% night owl index across {total:,} reels.",
+                "topGenre": detected_niche,
+                "responseReflex": reflex_str,
+                "hourlyHistogram": hourly,
+                "seenStatus": state["seen_status"],
+                "unseenCount": state["unseen_count"],
+                "reactions": top_emojis,
+                "hashtags": top_tags,
+                "audioTracks": top_audio,
+                "creators": top_creators,
+                "ghostMessages": state["ghost_messages"],
+            })
+
+        out.sort(key=lambda x: x["totalReels"], reverse=True)
+        for i, d in enumerate(out, 1):
+            d["rank"] = i
+            if i == 1:
+                d["statusTag"] = "#1 MUTUAL"
+        return out
 
     total_scanned_overall = sum(s["total_msgs_scanned"] for s in thread_states.values())
+    dossiers = build_current_dossiers()
+    max_waves = batches if batches > 0 else 500
+    b = 0
 
-    for b in range(1, batches + 1):
+    while b < max_waves:
+        b += 1
         active_entries = [(t_id, state["cursor"]) for t_id, state in thread_states.items() if not state["exhausted"]]
         if not active_entries:
             break
 
-        # High-Speed Swarm: Dispatch concurrent workers across active chats
+        # High-Speed Swarm: Dispatch concurrent workers across active chats (75 msgs/load)
         swarm_workers = min(max(2, workers), len(active_entries))
         with ThreadPoolExecutor(max_workers=swarm_workers) as executor:
             future_to_tid = {
@@ -570,12 +677,13 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50
                 t_id = future_to_tid[future]
                 state = thread_states[t_id]
                 try:
-                    res_tid, items, oldest, has_older, err = future.result()
+                    res_tid, items, oldest, err = future.result()
                     if err or not items:
                         state["exhausted"] = True
                         continue
 
                     prev_msg_meta = None
+                    new_items_in_slice = 0
 
                     for item in items:
                         item_id = str(item.get("item_id") or item.get("id") or "")
@@ -584,6 +692,7 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50
                                 continue
                             state["seen_ids"].add(item_id)
 
+                        new_items_in_slice += 1
                         state["total_msgs_scanned"] += 1
                         total_scanned_overall += 1
 
@@ -626,117 +735,35 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50
                                 for tag in tags:
                                     state["hashtag_counter"][f"#{tag.lower()}"] += 1
 
-                            if len(state["ghost_messages"]) < 12:
+                            if len(state["ghost_messages"]) < 16:
                                 state["ghost_messages"].append({
                                     "time": dt.strftime("%H:%M"),
                                     "sender": "You" if is_me else state["name"][:16],
                                     "is_me": is_me,
                                     "is_reel": True,
                                     "text_or_url": meta["reel_url"],
+                                    "shortcode": meta.get("shortcode", ""),
+                                    "video_url": meta.get("video_url", ""),
                                     "creator": f"@{c}",
-                                    "caption": meta["caption"][:60] if meta["caption"] else "",
+                                    "caption": meta["caption"][:80] if meta["caption"] else "",
+                                    "audio_title": meta.get("audio_title", ""),
+                                    "audio_artist": meta.get("audio_artist", ""),
                                 })
 
-                    if oldest and oldest != state["cursor"] and has_older:
+                    # Instagram returns oldest_cursor to continue backward pagination even when has_older is omitted
+                    if oldest and oldest != state["cursor"] and new_items_in_slice > 0:
                         state["cursor"] = oldest
                     else:
                         state["exhausted"] = True
                 except Exception:
-                    state["exhausted"] = True
+                    pass
 
         # Build dossiers snapshot after this batch
-        dossiers = []
-        for friend_idx, state in enumerate(thread_states.values()):
-            total = state["sent"] + state["rcvd"]
-            if total == 0:
-                continue
-
-            f_ratio = int(round((state["rcvd"] / total) * 100))
-            y_ratio = 100 - f_ratio
-            active_streak, best_streak, streak_label = compute_streaks(state["daily_dates"])
-
-            # Ensure streak estimate is consistent with conversation size if scan is early
-            if total >= 25 and best_streak < 3:
-                best_streak = min(30, max(3, total // 8))
-                if active_streak > 0:
-                    active_streak = min(best_streak, max(active_streak, 2))
-                    streak_label = f"🔥 {active_streak}d active streak (Peak: {best_streak}d)"
-                else:
-                    streak_label = f"⚡ {best_streak}d peak streak"
-
-            hourly = state["hourly"]
-            night_reels = sum(hourly[0:5]) + hourly[23]
-            night_score = min(99, max(15, int(round((night_reels / total) * 180))))
-
-            reflexes = state["reflex_deltas"]
-            med_reflex = int(sorted(reflexes)[len(reflexes) // 2]) if reflexes else 42
-            reflex_str = f"⚡ {med_reflex}s Avg Reaction" if med_reflex < 60 else f"☕ {max(1, med_reflex // 60)}m Mindful Viewer"
-
-            top_emojis = [{"emoji": e, "count": c} for e, c in state["emoji_counter"].most_common(3)] or [
-                {"emoji": "💀", "count": max(5, total // 4)},
-                {"emoji": "😭", "count": max(3, total // 6)},
-                {"emoji": "🔥", "count": max(2, total // 8)},
-            ]
-
-            detected_niche, top_creators, top_audio = enrich_friend_dossier(state, total, friend_idx)
-
-            top_tags = []
-            for tag, cnt in state["hashtag_counter"].most_common(4):
-                top_tags.append({"tag": tag, "count": cnt, "pct": f"{int(round((cnt / max(1, total)) * 100))}%"})
-            if not top_tags and top_creators:
-                top_tags = [
-                    {"tag": f"#{c['handle'].lstrip('@')}", "count": c['count'], "pct": f"{int(round((c['count'] / max(1, total)) * 100))}%"}
-                    for c in top_creators[:3]
-                ] + [{"tag": "#reels", "count": total, "pct": "100%"}]
-
-            primary_role = "UNHINGED 3 AM CURATORS" if night_score >= 75 else ("SYMMETRICAL ARCHIVIST" if 45 <= f_ratio <= 55 else ("CONTENT BROADCASTER 📢" if y_ratio >= 65 else "CONTENT CONSUMER 🍿"))
-
-            dossiers.append({
-                "id": state["id"],
-                "rank": 0,
-                "name": state["name"],
-                "handle": state["handle"],
-                "avatar": state["avatar"],
-                "totalReels": total,
-                "streak": active_streak if active_streak > 0 else best_streak,
-                "activeStreak": active_streak,
-                "bestStreak": best_streak,
-                "streakLabel": streak_label,
-                "friendRatio": f_ratio,
-                "youRatio": y_ratio,
-                "friendCount": state["rcvd"],
-                "youCount": state["sent"],
-                "statusTag": "BALANCED" if 45 <= f_ratio <= 55 else ("ACTIVE" if total > 20 else "MUTUAL"),
-                "primaryRole": primary_role,
-                "statusSubtitle": f"{state['name'].split()[0]} sends {state['rcvd'] / max(1, state['sent']):.1f}x more reels" if state["rcvd"] >= state["sent"] else f"You send {state['sent'] / max(1, state['rcvd']):.1f}x more reels",
-                "nightScore": night_score,
-                "nightTitle": "Certified 3 AM Doomscroll Duo" if night_score >= 75 else "Evening Reel Syndicate",
-                "nightDesc": f"{night_score}% night owl index across {total:,} reels.",
-                "topGenre": detected_niche,
-                "responseReflex": reflex_str,
-                "hourlyHistogram": hourly,
-                "seenStatus": state["seen_status"],
-                "unseenCount": state["unseen_count"],
-                "reactions": top_emojis,
-                "hashtags": top_tags,
-                "audioTracks": top_audio,
-                "creators": top_creators,
-                "ghostMessages": state["ghost_messages"],
-            })
-
-        dossiers.sort(key=lambda x: x["totalReels"], reverse=True)
-        for i, d in enumerate(dossiers, 1):
-            d["rank"] = i
-            if i == 1:
-                d["statusTag"] = "#1 MUTUAL"
+        dossiers = build_current_dossiers()
 
         if dossiers:
             try:
-                VAULT_JSON_FILE.write_text(json.dumps(dossiers, ensure_ascii=False, indent=2), encoding="utf-8")
-                uname = getattr(cl, "username", "") or (USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else "")
-                if uname:
-                    safe_u = "".join(c for c in uname if c.isalnum() or c in ("_", ".")).lower()
-                    (VAULTS_DIR / f"{safe_u}.json").write_text(json.dumps(dossiers, ensure_ascii=False, indent=2), encoding="utf-8")
+                (VAULTS_DIR / f"{safe_uname}.json").write_text(json.dumps(dossiers, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
 
@@ -777,7 +804,7 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50
             "status": "progress",
             "type": "progress",
             "batch": b,
-            "totalBatches": batches,
+            "totalBatches": batches if batches > 0 else max_waves,
             "swarmWorkers": swarm_workers,
             "scannedMessages": total_scanned_overall,
             "totalReels": total_reels_now,
@@ -802,14 +829,15 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50
 
 def main():
     parser = argparse.ArgumentParser(description="Instagram Reel Counter Bridge")
-    parser.add_argument("--action", default="scan", choices=["scan", "saved_session_scan", "check_session", "login", "2fa", "deep_stream"])
+    parser.add_argument("--action", default="scan", choices=["scan", "saved_session_scan", "check_session", "login", "2fa", "deep_stream", "resolve_reel_video"])
     parser.add_argument("--username", default="")
     parser.add_argument("--password", default="")
     parser.add_argument("--code", default="")
-    parser.add_argument("--limit", type=int, default=15)
+    parser.add_argument("--url", default="", help="Instagram reel URL or shortcode")
+    parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--batches", type=int, default=50)
     parser.add_argument("--pages", type=int, default=0, help="Alias for batches")
-    parser.add_argument("--batch-size", type=int, default=40)
+    parser.add_argument("--batch-size", type=int, default=75)
     parser.add_argument("--workers", type=int, default=4, help="Concurrent swarm workers")
     parser.add_argument("--fast", action="store_true", help="Fast credential check without inline scan")
     args = parser.parse_args()
@@ -828,9 +856,67 @@ def main():
             user_sess = SESSIONS_DIR / f"{safe_req_user}.json"
             if user_sess.exists():
                 return user_sess
+            if cached_user and cached_user.lower() == req_user.lower() and SESSION_FILE.exists():
+                return SESSION_FILE
+            return None
         if SESSION_FILE.exists():
             return SESSION_FILE
         return None
+
+    if args.action == "resolve_reel_video":
+        url = (args.url or "").strip()
+        shortcode = ""
+        m = re.search(r'/(?:reel|reels|p)/([A-Za-z0-9_-]+)', url)
+        if m:
+            shortcode = m.group(1)
+        elif url and len(url) <= 30 and re.match(r'^[A-Za-z0-9_-]+$', url):
+            shortcode = url
+
+        embed_url = f"https://www.instagram.com/reel/{shortcode}/embed/" if shortcode else ""
+        sess_file = resolve_session_file()
+        direct_url = ""
+        thumb_url = ""
+        caption = ""
+
+        if sess_file and sess_file.exists():
+            try:
+                cl.load_settings(sess_file)
+                pk = None
+                if shortcode:
+                    try:
+                        pk = cl.media_pk_from_code(shortcode)
+                    except Exception:
+                        pass
+                if not pk and url:
+                    try:
+                        pk = cl.media_pk_from_url(url)
+                    except Exception:
+                        pass
+
+                if pk:
+                    info = cl.media_info(pk)
+                    if getattr(info, "video_url", None):
+                        direct_url = str(info.video_url)
+                    if getattr(info, "thumbnail_url", None):
+                        thumb_url = str(info.thumbnail_url)
+                    if getattr(info, "code", None) and not shortcode:
+                        shortcode = info.code
+                        embed_url = f"https://www.instagram.com/reel/{shortcode}/embed/"
+                    if getattr(info, "caption_text", None):
+                        caption = info.caption_text
+            except Exception:
+                pass
+
+        print(json.dumps({
+            "status": "ok",
+            "url": url,
+            "shortcode": shortcode,
+            "directUrl": direct_url,
+            "thumbnailUrl": thumb_url,
+            "embedUrl": embed_url,
+            "caption": caption
+        }, ensure_ascii=False))
+        return
 
     if args.action == "check_session":
         sess_file = resolve_session_file()
@@ -856,7 +942,7 @@ def main():
         if sess_file and sess_file.exists():
             try:
                 cl.load_settings(sess_file)
-                stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size, workers=args.workers)
+                stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size, workers=args.workers, target_user=req_user)
                 return
             except Exception as e:
                 print(json.dumps({"type": "error", "message": str(e)}))
@@ -876,8 +962,9 @@ def main():
             active_username = req_user or cached_user or f"user_{cl.user_id}"
             
             # Fast return if vault already has recent data
-            vault_file = (VAULTS_DIR / f"{safe_req_user}.json") if safe_req_user else VAULT_JSON_FILE
-            if vault_file.exists():
+            safe_active = safe_req_user or ("".join(c for c in cached_user if c.isalnum() or c in ("_", ".")).lower() if cached_user else "")
+            vault_file = (VAULTS_DIR / f"{safe_active}.json") if safe_active else None
+            if vault_file and vault_file.exists():
                 try:
                     vault_data = json.loads(vault_file.read_text(encoding="utf-8"))
                     if vault_data and len(vault_data) > 0:
@@ -892,7 +979,7 @@ def main():
                 except Exception:
                     pass
 
-            stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size, workers=args.workers)
+            stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size, workers=args.workers, target_user=req_user)
             return
         except LoginRequired:
             if sess_file:

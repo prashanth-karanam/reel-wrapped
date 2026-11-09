@@ -530,6 +530,7 @@ interface ScanProgressState {
   totalReels: number;
   status: string;
   friends: any[];
+  activeUser?: string;
   error?: string;
   lastUpdated: number;
 }
@@ -542,6 +543,7 @@ let currentScanState: ScanProgressState = {
   totalReels: 0,
   status: 'idle',
   friends: [],
+  activeUser: '',
   lastUpdated: Date.now(),
 };
 
@@ -561,32 +563,62 @@ function broadcastScanState(event: string, data: any) {
 
 let activeScanChild: any = null;
 
-function triggerBackgroundDeepScan(limit = 15, batches = 50, batchSize = 40, workers = 4): boolean {
-  if (currentScanState.isScanning && activeScanChild) {
-    return false; // Already in progress
+function stopActiveScan() {
+  if (activeScanChild) {
+    try {
+      activeScanChild.kill();
+    } catch (_) {}
+    activeScanChild = null;
   }
+  currentScanState.isScanning = false;
+}
+
+function triggerBackgroundDeepScan(limit = 20, batches = 50, batchSize = 75, workers = 4, targetUser = ''): boolean {
+  const userTxtPath = path.join(os.homedir(), '.ig_toolkit', 'user.txt');
+  const diskUser = fs.existsSync(userTxtPath) ? fs.readFileSync(userTxtPath, 'utf8').trim() : '';
+  const effectiveUser = targetUser || diskUser || currentScanState.activeUser || '';
+
+  if (currentScanState.isScanning && activeScanChild) {
+    if (effectiveUser && currentScanState.activeUser && effectiveUser.toLowerCase() !== currentScanState.activeUser.toLowerCase()) {
+      stopActiveScan();
+    } else {
+      return false; // Already in progress for this user
+    }
+  }
+
+  const priorScanned = currentScanState.scannedMessages || 0;
+  const priorReels = currentScanState.totalReels || 
+    (currentScanState.friends && currentScanState.friends.length
+      ? currentScanState.friends.reduce((acc, f: any) => acc + (Number(f.totalReels) || 0), 0)
+      : 0);
 
   currentScanState = {
     isScanning: true,
-    batch: 0,
+    batch: currentScanState.batch || 0,
     totalBatches: batches,
-    scannedMessages: 0,
-    totalReels: 0,
-    status: `Launching swarm of ${workers} concurrent batch workers...`,
+    scannedMessages: priorScanned,
+    totalReels: priorReels,
+    status: `Launching swarm of ${workers} concurrent batch workers (75 msgs/load)...`,
     friends: currentScanState.friends && currentScanState.friends.length ? currentScanState.friends : [],
+    activeUser: effectiveUser,
     lastUpdated: Date.now(),
   };
   broadcastScanState('status', currentScanState);
 
   const scriptPath = path.join(__dirname, 'scan_bridge.py');
-  const child = spawn('python', [
+  const spawnArgs = [
     scriptPath,
     '--action', 'deep_stream',
     '--limit', String(limit),
     '--batches', String(batches),
     '--batch-size', String(batchSize),
     '--workers', String(workers),
-  ], {
+  ];
+  if (effectiveUser) {
+    spawnArgs.push('--username', effectiveUser);
+  }
+
+  const child = spawn('python', spawnArgs, {
     windowsHide: true,
     env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
   });
@@ -614,6 +646,7 @@ function triggerBackgroundDeepScan(limit = 15, batches = 50, batchSize = 40, wor
             totalReels: evt.totalReels,
             status: `⚡ Swarm Wave ${evt.batch}/${evt.totalBatches} (${w}x Parallel Workers active)...`,
             friends: evt.friends || [],
+            activeUser: effectiveUser,
             lastUpdated: Date.now(),
           };
           broadcastScanState('progress', currentScanState);
@@ -626,6 +659,7 @@ function triggerBackgroundDeepScan(limit = 15, batches = 50, batchSize = 40, wor
             totalReels: evt.totalReels,
             status: 'complete',
             friends: evt.friends || [],
+            activeUser: effectiveUser,
             lastUpdated: Date.now(),
           };
           broadcastScanState('complete', currentScanState);
@@ -722,21 +756,190 @@ app.get('/api/ig/live-scan-status', (_req, res) => {
 });
 
 app.post('/api/ig/start-deep-scan', (req, res) => {
-  const limit = Math.min(30, Math.max(5, Number(req.body?.limit) || 15));
+  const limit = Math.min(30, Math.max(5, Number(req.body?.limit) || 20));
   const batches = Math.min(200, Math.max(2, Number(req.body?.batches) || 50));
-  const batchSize = Math.min(100, Math.max(10, Number(req.body?.batchSize) || 40));
+  const batchSize = Math.min(100, Math.max(10, Number(req.body?.batchSize) || 75));
   const workers = Math.min(6, Math.max(2, Number(req.body?.workers) || 4));
+  const targetUser = String(req.body?.username || '').trim().replace(/^@/, '');
 
-  const started = triggerBackgroundDeepScan(limit, batches, batchSize, workers);
+  const started = triggerBackgroundDeepScan(limit, batches, batchSize, workers, targetUser);
   res.json({
     status: started ? 'started' : 'already_running',
     scanState: currentScanState,
   });
 });
 
-app.get('/api/ig/saved-session', async (_req, res) => {
+app.get('/api/ig/saved-accounts', async (_req, res) => {
   try {
-    const bridgeCheck = await runPythonScanBridge(['--action', 'check_session']);
+    const toolkitDir = path.join(os.homedir(), '.ig_toolkit');
+    const vaultsDir = path.join(toolkitDir, 'vaults');
+    const sessionsDir = path.join(toolkitDir, 'sessions');
+    const userTxt = path.join(toolkitDir, 'user.txt');
+    const activeUser = (fs.existsSync(userTxt) ? fs.readFileSync(userTxt, 'utf8').trim() : '') || currentScanState.activeUser || '';
+
+    const accountsMap: Record<string, any> = {};
+
+    // 1. Check vaults directory
+    if (fs.existsSync(vaultsDir)) {
+      const files = fs.readdirSync(vaultsDir);
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+        const u = file.replace(/\.json$/, '');
+        try {
+          const content = JSON.parse(fs.readFileSync(path.join(vaultsDir, file), 'utf8'));
+          const friendList = Array.isArray(content) ? content : [];
+          const totalReels = friendList.reduce((s: number, f: any) => s + (Number(f.totalReels) || 0), 0);
+          const stat = fs.statSync(path.join(vaultsDir, file));
+          accountsMap[u] = {
+            username: u,
+            hasVault: true,
+            hasSession: false,
+            friendCount: friendList.length,
+            totalReels,
+            updatedAt: stat.mtimeMs,
+            isActive: activeUser.toLowerCase() === u.toLowerCase(),
+          };
+        } catch (_) {}
+      }
+    }
+
+    // 2. Check sessions directory
+    if (fs.existsSync(sessionsDir)) {
+      const sFiles = fs.readdirSync(sessionsDir);
+      for (const sFile of sFiles) {
+        if (!sFile.endsWith('.json')) continue;
+        const u = sFile.replace(/\.json$/, '');
+        const stat = fs.statSync(path.join(sessionsDir, sFile));
+        if (!accountsMap[u]) {
+          accountsMap[u] = {
+            username: u,
+            hasVault: false,
+            hasSession: true,
+            friendCount: 0,
+            totalReels: 0,
+            updatedAt: stat.mtimeMs,
+            isActive: activeUser.toLowerCase() === u.toLowerCase(),
+          };
+        } else {
+          accountsMap[u].hasSession = true;
+        }
+      }
+    }
+
+    // Also check single session.json if userTxt exists
+    if (activeUser && fs.existsSync(path.join(toolkitDir, 'session.json'))) {
+      const safe = activeUser.toLowerCase().replace(/[^a-z0-9_.]/g, '');
+      if (accountsMap[safe]) {
+        accountsMap[safe].hasSession = true;
+      }
+    }
+
+    const accounts = Object.values(accountsMap).sort((a: any, b: any) => b.updatedAt - a.updatedAt);
+    return res.json({
+      status: 'ok',
+      activeUser,
+      accounts,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'fail', message: err.message });
+  }
+});
+
+app.post('/api/ig/switch-account', async (req, res) => {
+  try {
+    const rawUser = String(req.body?.username || '').trim().replace(/^@/, '');
+    if (!rawUser) {
+      return res.status(400).json({ status: 'fail', message: 'Username is required.' });
+    }
+
+    const safeU = rawUser.toLowerCase().replace(/[^a-z0-9_.]/g, '');
+    const toolkitDir = path.join(os.homedir(), '.ig_toolkit');
+    const vaultsDir = path.join(toolkitDir, 'vaults');
+    const sessionsDir = path.join(toolkitDir, 'sessions');
+    const userTxt = path.join(toolkitDir, 'user.txt');
+    const mainSession = path.join(toolkitDir, 'session.json');
+
+    // 1. Abort existing active background scan
+    stopActiveScan();
+
+    // 2. Set active user in user.txt
+    try {
+      fs.writeFileSync(userTxt, rawUser, 'utf8');
+    } catch (_) {}
+
+    // 3. Switch active session.json
+    const userSessionFile = path.join(sessionsDir, `${safeU}.json`);
+    let hasSession = false;
+    if (fs.existsSync(userSessionFile)) {
+      try {
+        fs.copyFileSync(userSessionFile, mainSession);
+        hasSession = true;
+      } catch (_) {}
+    } else {
+      // Check if current mainSession belongs to this user
+      if (fs.existsSync(mainSession)) {
+        try {
+          const sess = JSON.parse(fs.readFileSync(mainSession, 'utf8'));
+          if (sess.username && sess.username.toLowerCase() === safeU) {
+            hasSession = true;
+          } else {
+            // Unlink mainSession so we don't leak user A's credentials to user B
+            fs.unlinkSync(mainSession);
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 4. Load vault data for this specific user
+    const userVaultFile = path.join(vaultsDir, `${safeU}.json`);
+    let friends: any[] = [];
+    if (fs.existsSync(userVaultFile)) {
+      try {
+        friends = JSON.parse(fs.readFileSync(userVaultFile, 'utf8'));
+      } catch (_) {}
+    }
+
+    const totalReels = friends.reduce((s: number, f: any) => s + (Number(f.totalReels) || 0), 0);
+
+    // 5. Update in-memory scan state
+    currentScanState = {
+      isScanning: false,
+      batch: 0,
+      totalBatches: 50,
+      scannedMessages: 0,
+      totalReels,
+      status: `Switched account to @${rawUser}`,
+      friends,
+      activeUser: rawUser,
+      lastUpdated: Date.now(),
+    };
+    broadcastScanState('status', currentScanState);
+
+    // 6. If user has a valid session, auto-trigger background deep-scan for this specific user
+    if (hasSession) {
+      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, rawUser), 400);
+    }
+
+    return res.json({
+      status: 'ok',
+      username: rawUser,
+      hasSession,
+      friends,
+      totalReels,
+      totalScanned: friends.length,
+      message: `Switched to @${rawUser}. Loaded ${friends.length} threads.`,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'fail', message: err.message });
+  }
+});
+
+app.get('/api/ig/saved-session', async (req, res) => {
+  const reqUser = String(req.query?.username || '').trim().replace(/^@/, '');
+  try {
+    const bridgeArgs = ['--action', 'check_session'];
+    if (reqUser) bridgeArgs.push('--username', reqUser);
+    const bridgeCheck = await runPythonScanBridge(bridgeArgs);
     if (bridgeCheck && bridgeCheck.status === 'ok' && bridgeCheck.exists) {
       return res.json({
         exists: true,
@@ -747,11 +950,15 @@ app.get('/api/ig/saved-session', async (_req, res) => {
     }
   } catch {}
 
+  const toolkitDir = path.join(os.homedir(), '.ig_toolkit');
+  const safeReq = reqUser.toLowerCase().replace(/[^a-z0-9_.]/g, '');
   const candidatePaths = [
-    path.join(os.homedir(), '.ig_toolkit', 'session.json'),
+    safeReq ? path.join(toolkitDir, 'sessions', `${safeReq}.json`) : null,
+    path.join(toolkitDir, 'session.json'),
     path.join(os.homedir(), '.ig_reel_counter', 'session.json'),
     path.join(__dirname, 'session.json'),
-  ];
+  ].filter(Boolean) as string[];
+
   for (const cp of candidatePaths) {
     if (fs.existsSync(cp)) {
       try {
@@ -761,6 +968,9 @@ app.get('/api/ig/saved-session', async (_req, res) => {
         const userTxt = path.join(path.dirname(cp), 'user.txt');
         const username = fs.existsSync(userTxt) ? fs.readFileSync(userTxt, 'utf8').trim() : (sess.username || 'cached_user');
         if (sid) {
+          if (reqUser && username.toLowerCase() !== reqUser.toLowerCase()) {
+            continue; // Not matching requested user
+          }
           return res.json({ exists: true, username, sessionid: sid, ds_user_id: uid });
         }
       } catch {}
@@ -769,13 +979,24 @@ app.get('/api/ig/saved-session', async (_req, res) => {
   return res.json({ exists: false });
 });
 
-app.post('/api/ig/saved-session-scan', async (_req, res) => {
+app.post('/api/ig/saved-session-scan', async (req, res) => {
   try {
-    console.log('[ReelWrapped] Running saved session scan via Python bridge...');
-    const scanResult = await runPythonScanBridge(['--action', 'saved_session_scan', '--limit', '15', '--batches', '4', '--batch-size', '40']);
+    const rawUser = String(req.body?.username || '').trim().replace(/^@/, '');
+    console.log(`[ReelWrapped] Running saved session scan via Python bridge for user: ${rawUser || 'default'}...`);
+    const bridgeArgs = ['--action', 'saved_session_scan', '--limit', '15', '--batches', '4', '--batch-size', '40'];
+    if (rawUser) {
+      bridgeArgs.push('--username', rawUser);
+    }
+    const scanResult = await runPythonScanBridge(bridgeArgs);
     if (scanResult && (scanResult.status === 'ok' || scanResult.type === 'complete')) {
-      // Auto-trigger continuous deep-scan in background
-      setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 1000);
+      const activeUser = scanResult.username || rawUser || '';
+      if (scanResult.friends) {
+        currentScanState.friends = scanResult.friends;
+        currentScanState.activeUser = activeUser;
+        currentScanState.totalReels = scanResult.friends.reduce((acc: number, f: any) => acc + (Number(f.totalReels) || 0), 0);
+      }
+      // Auto-trigger continuous deep-scan in background for this specific user
+      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, activeUser), 500);
       return res.json(scanResult);
     }
     return res.status(400).json(scanResult || { status: 'fail', message: 'Could not load saved session.' });
@@ -1051,42 +1272,50 @@ app.post('/api/ig/login', async (req, res) => {
   try {
     const { username = '', password = '', sessionid = '' } = req.body || {};
     const cleanUsername = String(username || '').trim().replace(/^@/, '');
+    const hasPassword = Boolean(password && String(password).trim());
 
     // 1. Check if user requested saved session or if requested username matches cached user in ~/.ig_toolkit
-    const check = await runPythonScanBridge(['--action', 'check_session', '--username', cleanUsername || '']);
-    const isCachedUser = check?.exists && (!cleanUsername || (check.username && cleanUsername.toLowerCase() === check.username.toLowerCase()));
+    // ONLY use saved session fast-path if user did NOT provide an explicit password
+    if (!hasPassword) {
+      const check = await runPythonScanBridge(['--action', 'check_session', '--username', cleanUsername || '']);
+      const isCachedUser = check?.exists && (!cleanUsername || (check.username && cleanUsername.toLowerCase() === check.username.toLowerCase()));
 
-    if (isCachedUser || sessionid === 'active_local_session') {
-      const activeUser = check?.username || cleanUsername || 'user';
-      console.log(`[ReelWrapped] Using verified local toolkit session for @${activeUser}`);
+      if (isCachedUser || sessionid === 'active_local_session') {
+        const activeUser = check?.username || cleanUsername || 'user';
+        console.log(`[ReelWrapped] Using verified local toolkit session for @${activeUser}`);
 
-      // Fast-path: If local vault already has data, respond INSTANTLY and kick off progressive deep scan in background!
-      const vaultPath = path.join(os.homedir(), '.ig_toolkit', 'reel_wrapped_local_vault.json');
-      let cachedFriends: any[] = [];
-      if (fs.existsSync(vaultPath)) {
-        try {
-          cachedFriends = JSON.parse(fs.readFileSync(vaultPath, 'utf8'));
-        } catch (_) {}
-      }
+        // Fast-path: If local vault already has data, respond INSTANTLY and kick off progressive deep scan in background!
+        const safeU = activeUser.toLowerCase().replace(/[^a-z0-9_.]/g, '');
+        const userVault = path.join(os.homedir(), '.ig_toolkit', 'vaults', `${safeU}.json`);
+        let cachedFriends: any[] = [];
+        if (fs.existsSync(userVault)) {
+          try {
+            cachedFriends = JSON.parse(fs.readFileSync(userVault, 'utf8'));
+          } catch (_) {}
+        }
 
-      if (cachedFriends.length > 0) {
-        currentScanState.friends = cachedFriends;
-        setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 300);
-        return res.json({
-          status: 'ok',
-          authMethod: 'local_vault_fast',
-          user: { username: activeUser },
-          username: activeUser,
-          friends: cachedFriends,
-          totalScanned: cachedFriends.length,
-        });
-      }
+        if (cachedFriends.length > 0) {
+          currentScanState.friends = cachedFriends;
+          currentScanState.activeUser = activeUser;
+          currentScanState.totalReels = cachedFriends.reduce((acc: number, f: any) => acc + (Number(f.totalReels) || 0), 0);
+          setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, activeUser), 300);
+          return res.json({
+            status: 'ok',
+            authMethod: 'local_vault_fast',
+            user: { username: activeUser },
+            username: activeUser,
+            friends: cachedFriends,
+            totalScanned: cachedFriends.length,
+          });
+        }
 
-      const bridgeRes2 = await runPythonScanBridge(['--action', 'saved_session_scan', '--username', cleanUsername || '', '--limit', '10', '--batches', '2', '--batch-size', '30']);
-      if (bridgeRes2 && (bridgeRes2.status === 'ok' || bridgeRes2.type === 'complete')) {
-        if (bridgeRes2.friends) currentScanState.friends = bridgeRes2.friends;
-        setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 500);
-        return res.json(bridgeRes2);
+        const bridgeRes2 = await runPythonScanBridge(['--action', 'saved_session_scan', '--username', cleanUsername || '', '--limit', '10', '--batches', '2', '--batch-size', '30']);
+        if (bridgeRes2 && (bridgeRes2.status === 'ok' || bridgeRes2.type === 'complete')) {
+          if (bridgeRes2.friends) currentScanState.friends = bridgeRes2.friends;
+          currentScanState.activeUser = activeUser;
+          setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, activeUser), 500);
+          return res.json(bridgeRes2);
+        }
       }
     }
 
@@ -1147,21 +1376,20 @@ app.post('/api/ig/login', async (req, res) => {
     }
 
     if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
-      // Trigger background swarm scanning for live progressive feed
-      setTimeout(() => triggerBackgroundDeepScan(15, 8, 40, 5), 500);
-
-      // Return fast success with any available vault data
+      // Return fast success with any available vault data for this specific user
       const safeU = cleanUsername.toLowerCase().replace(/[^a-z0-9_.]/g, '');
       const userVault = path.join(os.homedir(), '.ig_toolkit', 'vaults', `${safeU}.json`);
-      const defaultVault = path.join(os.homedir(), '.ig_toolkit', 'reel_wrapped_local_vault.json');
       let friendsList = bridgeRes.friends || [];
-      if (!friendsList.length) {
-        if (fs.existsSync(userVault)) {
-          try { friendsList = JSON.parse(fs.readFileSync(userVault, 'utf8')); } catch (_) {}
-        } else if (fs.existsSync(defaultVault)) {
-          try { friendsList = JSON.parse(fs.readFileSync(defaultVault, 'utf8')); } catch (_) {}
-        }
+      if (!friendsList.length && fs.existsSync(userVault)) {
+        try { friendsList = JSON.parse(fs.readFileSync(userVault, 'utf8')); } catch (_) {}
       }
+
+      currentScanState.friends = friendsList;
+      currentScanState.totalReels = friendsList.reduce((acc: number, f: any) => acc + (Number(f.totalReels) || 0), 0);
+      currentScanState.scannedMessages = 0;
+
+      // Trigger background swarm scanning for live progressive feed for this specific user
+      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, cleanUsername), 500);
 
       return res.json({
         status: 'ok',
@@ -1208,7 +1436,7 @@ app.post('/api/ig/2fa', async (req, res) => {
     ]);
 
     if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
-      setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 500);
+      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, cleanUsername), 500);
       return res.json(bridgeRes);
     }
     return res.status(400).json(bridgeRes || { status: 'fail', message: '2FA verification failed' });
@@ -1222,18 +1450,23 @@ app.get('/api/ig/media-proxy', (req, res) => {
   if (!targetUrl.startsWith('https://')) {
     return res.status(400).send('Invalid media URL');
   }
+  const headers: Record<string, string> = {
+    'User-Agent': IG_ANDROID_UA,
+    Accept: '*/*',
+  };
+  if (req.headers.range) {
+    headers['Range'] = req.headers.range as string;
+  }
   https
     .get(
       targetUrl,
-      {
-        headers: {
-          'User-Agent': IG_ANDROID_UA,
-          Accept: '*/*',
-        },
-      },
+      { headers },
       (upRes) => {
+        res.status(upRes.statusCode || 200);
         if (upRes.headers['content-type']) res.setHeader('Content-Type', upRes.headers['content-type']);
         if (upRes.headers['content-length']) res.setHeader('Content-Length', upRes.headers['content-length']);
+        if (upRes.headers['content-range']) res.setHeader('Content-Range', upRes.headers['content-range']);
+        if (upRes.headers['accept-ranges']) res.setHeader('Accept-Ranges', upRes.headers['accept-ranges']);
         res.setHeader('Cache-Control', 'public, max-age=3600');
         upRes.pipe(res);
       }
@@ -1241,129 +1474,83 @@ app.get('/api/ig/media-proxy', (req, res) => {
     .on('error', () => res.status(502).send('Media proxy stream failed'));
 });
 
+app.get('/api/ig/reel-video', async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || req.query.text_or_url || '').trim();
+    const shortcode = String(req.query.shortcode || '').trim();
+    let target = rawUrl;
+    if (!target && shortcode) {
+      target = `https://www.instagram.com/reel/${shortcode}/`;
+    }
+    if (!target) {
+      return res.status(400).json({ status: 'fail', message: 'URL or shortcode is required' });
+    }
+
+    const bridgeRes = await runPythonScanBridge([
+      '--action', 'resolve_reel_video',
+      '--url', target,
+    ]);
+
+    if (bridgeRes && bridgeRes.status === 'ok') {
+      const directUrl = bridgeRes.directUrl
+        ? `/api/ig/media-proxy?url=${encodeURIComponent(bridgeRes.directUrl)}`
+        : '';
+      const thumbUrl = bridgeRes.thumbnailUrl
+        ? `/api/ig/media-proxy?url=${encodeURIComponent(bridgeRes.thumbnailUrl)}`
+        : '';
+      const finalEmbed = bridgeRes.embedUrl || (bridgeRes.shortcode ? `https://www.instagram.com/reel/${bridgeRes.shortcode}/embed/` : '');
+      return res.json({
+        status: 'ok',
+        url: target,
+        shortcode: bridgeRes.shortcode || shortcode,
+        directUrl,
+        direct_url: directUrl,
+        rawDirectUrl: bridgeRes.directUrl || '',
+        thumbnailUrl: thumbUrl,
+        embedUrl: finalEmbed,
+        embed_url: finalEmbed,
+        caption: bridgeRes.caption || '',
+      });
+    }
+
+    let extractedCode = shortcode;
+    const m = target.match(/\/(?:reel|reels|p)\/([A-Za-z0-9_-]+)/);
+    if (m) extractedCode = m[1];
+    return res.json({
+      status: 'ok',
+      url: target,
+      shortcode: extractedCode,
+      directUrl: '',
+      thumbnailUrl: '',
+      embedUrl: extractedCode ? `https://www.instagram.com/reel/${extractedCode}/embed/` : '',
+      caption: '',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ status: 'fail', message: err.message || 'Error resolving reel video' });
+  }
+});
+
 app.get('/api/friends', (req, res) => {
   const reqUser = String(req.query.user || '').trim().replace(/^@/, '').toLowerCase();
-  if (reqUser) {
-    const userVault = path.join(os.homedir(), '.ig_toolkit', 'vaults', `${reqUser}.json`);
+  const safeU = reqUser || (currentScanState.activeUser ? currentScanState.activeUser.toLowerCase().replace(/[^a-z0-9_.]/g, '') : '');
+  if (safeU) {
+    const userVault = path.join(os.homedir(), '.ig_toolkit', 'vaults', `${safeU}.json`);
     if (fs.existsSync(userVault)) {
       try {
-        return res.json(JSON.parse(fs.readFileSync(userVault, 'utf8')));
+        const parsed = JSON.parse(fs.readFileSync(userVault, 'utf8'));
+        if (Array.isArray(parsed) && parsed.length > 0) return res.json(parsed);
       } catch {}
     }
   }
-  if (currentScanState.friends && currentScanState.friends.length > 0) {
-    return res.json(currentScanState.friends);
+  if (currentScanState.activeUser && safeU && currentScanState.activeUser.toLowerCase() === safeU) {
+    if (currentScanState.friends && currentScanState.friends.length > 0) {
+      return res.json(currentScanState.friends);
+    }
   }
   res.json([]);
 });
 
-let githubSyncStatus = 'pending';
-
-async function syncCleanBuildToGithub() {
-  const token = (process.env.github || process.env.GITHUB || '').trim();
-  if (!token) {
-    githubSyncStatus = 'skipped_no_token';
-    return;
-  }
-  try {
-    const { execSync } = await import('child_process');
-    const filesToCopy = [
-      'spectator-auth.js',
-      'manifest.json',
-      'sw.js',
-      'reel_engine.wasm',
-      'icon.svg',
-      'pwa-192x192.png',
-      'pwa-512x512.png',
-      'pwa-maskable-512x512.png',
-      'apple-touch-icon.png',
-    ];
-    for (const f of filesToCopy) {
-      const src = path.join(__dirname, 'public', f);
-      const dst = path.join(__dirname, f);
-      if (fs.existsSync(src)) fs.copyFileSync(src, dst);
-    }
-
-    const stageDir = `/tmp/rw_push_${Date.now()}`;
-    const cleanEnv = {
-      PATH: process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
-      HOME: '/tmp',
-    };
-
-    const wfSrc = path.join(__dirname, '.github', 'workflows', 'build-apk-and-pages.yml');
-    const wfDst = path.join(__dirname, 'github-apk-workflow.yml');
-    if (fs.existsSync(wfSrc)) fs.copyFileSync(wfSrc, wfDst);
-
-    execSync(
-      `mkdir -p ${stageDir} && tar --exclude='./node_modules' --exclude='./dist' --exclude='./.git' --exclude='./.github' --exclude='./.env*' --exclude='./public/assets' --exclude='./server.js' -cf - . | (cd ${stageDir} && tar -xf - --no-same-owner)`,
-      { cwd: __dirname, env: cleanEnv, stdio: 'pipe' }
-    );
-
-    // Strip the internal syncCleanBuildToGithub token helper from the staged server.ts so the public repo is 100% pure
-    const stagedServerPath = path.join(stageDir, 'server.ts');
-    if (fs.existsSync(stagedServerPath)) {
-      let srv = fs.readFileSync(stagedServerPath, 'utf8');
-      srv = srv.replace(/syncCleanBuildToGithub\(\);/g, '');
-      fs.writeFileSync(stagedServerPath, srv, 'utf8');
-    }
-
-    execSync(
-      `rm -rf .git && git init -b main && git config user.name "Prashanth Karanam" && git config user.email "prashanth-karanam@users.noreply.github.com" && git add -A && git commit -m "feat: Reel Wrapped v2.4 (Multi-User Login Gate, In-App 9:16 Spectator, Rust/WASM, 1-Line Localhost/Electron & Android APK)" && git remote add origin "https://prashanth-karanam:${token}@github.com/prashanth-karanam/reel-wrapped.git" && git push -u origin main --force && rm -rf ${stageDir}`,
-      { cwd: stageDir, env: cleanEnv, stdio: 'pipe' }
-    );
-    githubSyncStatus = 'pushed_clean_v2.4_to_prashanth-karanam/reel-wrapped';
-  } catch (e: any) {
-    githubSyncStatus = `error: ${e?.stderr?.toString() || e?.message || 'push failed'}`;
-  }
-}
-
-app.get('/api/download-clean-repo', async (_req, res) => {
-  const stamp = Date.now();
-  const stageDir = `/tmp/rw_clean_stage_${stamp}`;
-  const archivePath = `/tmp/reel-wrapped-v2.4-clean-${stamp}.tar.gz`;
-  try {
-    const { execSync } = await import('child_process');
-    const filesToCopy = [
-      'spectator-auth.js',
-      'manifest.json',
-      'sw.js',
-      'reel_engine.wasm',
-      'icon.svg',
-      'pwa-192x192.png',
-      'pwa-512x512.png',
-      'pwa-maskable-512x512.png',
-      'apple-touch-icon.png',
-    ];
-    for (const f of filesToCopy) {
-      const src = path.join(__dirname, 'public', f);
-      const dst = path.join(__dirname, f);
-      if (fs.existsSync(src)) fs.copyFileSync(src, dst);
-    }
-
-    execSync(
-      `mkdir -p ${stageDir} && tar --exclude='./node_modules' --exclude='./dist' --exclude='./.git' --exclude='./.env*' --exclude='./public/assets' --exclude='./server.js' -cf - . | (cd ${stageDir} && tar -xf - --no-same-owner)`,
-      { cwd: __dirname, stdio: 'pipe' }
-    );
-
-    const stagedServerPath = path.join(stageDir, 'server.ts');
-    if (fs.existsSync(stagedServerPath)) {
-      let srv = fs.readFileSync(stagedServerPath, 'utf8');
-      srv = srv.replace(/syncCleanBuildToGithub\(\);/g, '');
-      fs.writeFileSync(stagedServerPath, srv, 'utf8');
-    }
-
-    execSync(`tar -czf ${archivePath} -C ${stageDir} .`, { stdio: 'pipe' });
-
-    res.download(archivePath, 'reel-wrapped-v2.4-clean.tar.gz', () => {
-      try {
-        fs.rmSync(stageDir, { recursive: true, force: true });
-        fs.rmSync(archivePath, { force: true });
-      } catch {}
-    });
-  } catch (e: any) {
-    res.status(500).send(e?.message || 'Archive failed');
-  }
-});
+let githubSyncStatus = 'ready';
 
 app.get('/api/status', (_req, res) => {
   res.json({
@@ -1377,7 +1564,34 @@ app.get('/api/status', (_req, res) => {
 });
 
 async function startServer() {
-  syncCleanBuildToGithub();
+  // Preload local vault cache into memory for active user if configured
+  const toolkitDir = path.join(os.homedir(), '.ig_toolkit');
+  const userTxtPath = path.join(toolkitDir, 'user.txt');
+  const activeUser = fs.existsSync(userTxtPath) ? fs.readFileSync(userTxtPath, 'utf8').trim() : '';
+  const safeU = activeUser.toLowerCase().replace(/[^a-z0-9_.]/g, '');
+
+  if (safeU) {
+    const userVaultPath = path.join(toolkitDir, 'vaults', `${safeU}.json`);
+    if (fs.existsSync(userVaultPath)) {
+      try {
+        const cached = JSON.parse(fs.readFileSync(userVaultPath, 'utf8'));
+        if (Array.isArray(cached) && cached.length > 0) {
+          currentScanState.friends = cached;
+          currentScanState.activeUser = activeUser;
+          currentScanState.totalReels = cached.reduce((acc: number, f: any) => acc + (Number(f.totalReels) || 0), 0);
+          console.log(`[ReelWrapped] Preloaded @${activeUser} with ${cached.length} friends (${currentScanState.totalReels} reels) from user vault.`);
+        }
+      } catch {}
+    }
+
+    const sessionPath = path.join(toolkitDir, 'session.json');
+    if (fs.existsSync(sessionPath)) {
+      setTimeout(() => {
+        console.log(`[ReelWrapped] Auto-starting high-throughput swarm deep scan on boot for @${activeUser} (20 chats, 75 msgs/load, 4 workers)...`);
+        triggerBackgroundDeepScan(20, 50, 75, 4, activeUser);
+      }, 1200);
+    }
+  }
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
