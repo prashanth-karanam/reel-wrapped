@@ -1053,7 +1053,7 @@ app.post('/api/ig/login', async (req, res) => {
     const cleanUsername = String(username || '').trim().replace(/^@/, '');
 
     // 1. Check if user requested saved session or if requested username matches cached user in ~/.ig_toolkit
-    const check = await runPythonScanBridge(['--action', 'check_session']);
+    const check = await runPythonScanBridge(['--action', 'check_session', '--username', cleanUsername || '']);
     const isCachedUser = check?.exists && (!cleanUsername || (check.username && cleanUsername.toLowerCase() === check.username.toLowerCase()));
 
     if (isCachedUser || sessionid === 'active_local_session') {
@@ -1070,6 +1070,7 @@ app.post('/api/ig/login', async (req, res) => {
       }
 
       if (cachedFriends.length > 0) {
+        currentScanState.friends = cachedFriends;
         setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 300);
         return res.json({
           status: 'ok',
@@ -1081,10 +1082,11 @@ app.post('/api/ig/login', async (req, res) => {
         });
       }
 
-      const bridgeRes = await runPythonScanBridge(['--action', 'saved_session_scan', '--limit', '10', '--batches', '2', '--batch-size', '30']);
-      if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
+      const bridgeRes2 = await runPythonScanBridge(['--action', 'saved_session_scan', '--username', cleanUsername || '', '--limit', '10', '--batches', '2', '--batch-size', '30']);
+      if (bridgeRes2 && (bridgeRes2.status === 'ok' || bridgeRes2.type === 'complete')) {
+        if (bridgeRes2.friends) currentScanState.friends = bridgeRes2.friends;
         setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 500);
-        return res.json(bridgeRes);
+        return res.json(bridgeRes2);
       }
     }
 
@@ -1114,6 +1116,7 @@ app.post('/api/ig/login', async (req, res) => {
       }
 
       const scanResult = await scanLiveInstagramInbox(cookies, cleanUsername || 'you');
+      if (scanResult.friends) currentScanState.friends = scanResult.friends;
       return res.json({ status: 'ok', authMethod: 'sessionid', ...scanResult });
     }
 
@@ -1125,8 +1128,6 @@ app.post('/api/ig/login', async (req, res) => {
     }
 
     // 3. Primary Authentication: Native Python Instagrapi Bridge
-    // This connects via Instagram's mobile API (identical to instagram-reel-counter)
-    // completely avoiding the web AJAX rate-limit and "user: false" anti-bot blocks!
     console.log(`[ReelWrapped] Authenticating @${cleanUsername} via Python instagrapi bridge...`);
     const bridgeRes = await runPythonScanBridge([
       '--action', 'login',
@@ -1137,16 +1138,39 @@ app.post('/api/ig/login', async (req, res) => {
       '--batch-size', '30',
     ]);
 
-    if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
-      setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 500);
-      return res.json(bridgeRes);
-    }
-
     if (bridgeRes && bridgeRes.status === 'two_factor_required') {
       return res.json({
         status: 'two_factor_required',
         username: cleanUsername,
         two_factor_identifier: 'py_2fa',
+      });
+    }
+
+    if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
+      // Trigger background swarm scanning for live progressive feed
+      setTimeout(() => triggerBackgroundDeepScan(15, 8, 40, 5), 500);
+
+      // Return fast success with any available vault data
+      const safeU = cleanUsername.toLowerCase().replace(/[^a-z0-9_.]/g, '');
+      const userVault = path.join(os.homedir(), '.ig_toolkit', 'vaults', `${safeU}.json`);
+      const defaultVault = path.join(os.homedir(), '.ig_toolkit', 'reel_wrapped_local_vault.json');
+      let friendsList = bridgeRes.friends || [];
+      if (!friendsList.length) {
+        if (fs.existsSync(userVault)) {
+          try { friendsList = JSON.parse(fs.readFileSync(userVault, 'utf8')); } catch (_) {}
+        } else if (fs.existsSync(defaultVault)) {
+          try { friendsList = JSON.parse(fs.readFileSync(defaultVault, 'utf8')); } catch (_) {}
+        }
+      }
+
+      return res.json({
+        status: 'ok',
+        authMethod: bridgeRes.authMethod || 'instagrapi_login',
+        user: { username: bridgeRes.username || cleanUsername },
+        username: bridgeRes.username || cleanUsername,
+        friends: friendsList,
+        totalScanned: friendsList.length,
+        message: bridgeRes.message || `Authenticated as @${cleanUsername}. Swarm scanner active!`,
       });
     }
 
@@ -1217,7 +1241,16 @@ app.get('/api/ig/media-proxy', (req, res) => {
     .on('error', () => res.status(502).send('Media proxy stream failed'));
 });
 
-app.get('/api/friends', (_req, res) => {
+app.get('/api/friends', (req, res) => {
+  const reqUser = String(req.query.user || '').trim().replace(/^@/, '').toLowerCase();
+  if (reqUser) {
+    const userVault = path.join(os.homedir(), '.ig_toolkit', 'vaults', `${reqUser}.json`);
+    if (fs.existsSync(userVault)) {
+      try {
+        return res.json(JSON.parse(fs.readFileSync(userVault, 'utf8')));
+      } catch {}
+    }
+  }
   if (currentScanState.friends && currentScanState.friends.length > 0) {
     return res.json(currentScanState.friends);
   }

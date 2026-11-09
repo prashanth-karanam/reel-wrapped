@@ -31,9 +31,13 @@ SESSION_FILE = TOOLKIT_DIR / "session.json"
 USER_FILE = TOOLKIT_DIR / "user.txt"
 CACHE_DIR = TOOLKIT_DIR / "cache"
 VAULT_JSON_FILE = TOOLKIT_DIR / "reel_wrapped_local_vault.json"
+SESSIONS_DIR = TOOLKIT_DIR / "sessions"
+VAULTS_DIR = TOOLKIT_DIR / "vaults"
 
 TOOLKIT_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+VAULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 try:
     from instagrapi import Client
@@ -702,6 +706,10 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6,
         if dossiers:
             try:
                 VAULT_JSON_FILE.write_text(json.dumps(dossiers, ensure_ascii=False, indent=2), encoding="utf-8")
+                uname = getattr(cl, "username", "") or (USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else "")
+                if uname:
+                    safe_u = "".join(c for c in uname if c.isalnum() or c in ("_", ".")).lower()
+                    (VAULTS_DIR / f"{safe_u}.json").write_text(json.dumps(dossiers, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
 
@@ -748,6 +756,7 @@ def main():
     parser.add_argument("--pages", type=int, default=0, help="Alias for batches")
     parser.add_argument("--batch-size", type=int, default=40)
     parser.add_argument("--workers", type=int, default=5, help="Concurrent swarm workers")
+    parser.add_argument("--fast", action="store_true", help="Fast credential check without inline scan")
     args = parser.parse_args()
 
     if args.pages and args.pages > 0:
@@ -755,16 +764,30 @@ def main():
 
     cl = get_client()
     cached_user = USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else ""
+    req_user = args.username.strip().lstrip("@")
+    safe_req_user = "".join(c for c in req_user if c.isalnum() or c in ("_", ".")).lower() if req_user else ""
+
+    # Helper to resolve user session file
+    def resolve_session_file():
+        if safe_req_user:
+            user_sess = SESSIONS_DIR / f"{safe_req_user}.json"
+            if user_sess.exists():
+                return user_sess
+        if SESSION_FILE.exists():
+            return SESSION_FILE
+        return None
 
     if args.action == "check_session":
-        if SESSION_FILE.exists():
+        sess_file = resolve_session_file()
+        if sess_file and sess_file.exists():
             try:
-                cl.load_settings(SESSION_FILE)
+                cl.load_settings(sess_file)
+                u_name = req_user or cached_user or f"User_{cl.user_id}"
                 print(json.dumps({
                     "status": "ok",
                     "exists": True,
                     "user_id": str(cl.user_id),
-                    "username": cached_user or f"User_{cl.user_id}"
+                    "username": u_name
                 }))
                 return
             except Exception as e:
@@ -774,9 +797,10 @@ def main():
         return
 
     if args.action == "deep_stream":
-        if SESSION_FILE.exists():
+        sess_file = resolve_session_file()
+        if sess_file and sess_file.exists():
             try:
-                cl.load_settings(SESSION_FILE)
+                cl.load_settings(sess_file)
                 stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size, workers=args.workers)
                 return
             except Exception as e:
@@ -786,106 +810,134 @@ def main():
             print(json.dumps({"type": "error", "message": "No session available for deep stream."}))
             return
 
-    # Check if we should use existing saved session
-    req_user = args.username.strip().lstrip("@").lower()
-    can_use_saved_session = (
-        SESSION_FILE.exists() and (
-            args.action == "saved_session_scan" or
-            not req_user or
-            (cached_user and req_user == cached_user.lower())
-        )
-    )
+    if args.action == "saved_session_scan":
+        sess_file = resolve_session_file()
+        if not sess_file or not sess_file.exists():
+            print(json.dumps({"status": "fail", "code": "NO_SESSION", "message": "No saved session found. Please sign in."}))
+            return
 
-    if can_use_saved_session:
         try:
-            cl.load_settings(SESSION_FILE)
-            active_username = cached_user or f"user_{cl.user_id}"
+            cl.load_settings(sess_file)
+            active_username = req_user or cached_user or f"user_{cl.user_id}"
+            
+            # Fast return if vault already has recent data
+            vault_file = (VAULTS_DIR / f"{safe_req_user}.json") if safe_req_user else VAULT_JSON_FILE
+            if vault_file.exists():
+                try:
+                    vault_data = json.loads(vault_file.read_text(encoding="utf-8"))
+                    if vault_data and len(vault_data) > 0:
+                        print(json.dumps({
+                            "status": "ok",
+                            "authMethod": "local_vault_cache",
+                            "username": active_username,
+                            "friends": vault_data,
+                            "totalScanned": len(vault_data)
+                        }, ensure_ascii=False))
+                        return
+                except Exception:
+                    pass
+
             stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size, workers=args.workers)
             return
         except LoginRequired:
-            SESSION_FILE.unlink(missing_ok=True)
-            USER_FILE.unlink(missing_ok=True)
+            if sess_file:
+                sess_file.unlink(missing_ok=True)
+            if sess_file == SESSION_FILE:
+                USER_FILE.unlink(missing_ok=True)
             print(json.dumps({
                 "status": "fail",
                 "code": "SESSION_EXPIRED",
-                "message": "Saved session expired. Please enter your credentials."
+                "message": "Saved session has expired. Please sign in with your credentials."
             }))
             return
         except Exception as e:
-            if VAULT_JSON_FILE.exists():
-                try:
-                    vault_data = json.loads(VAULT_JSON_FILE.read_text(encoding="utf-8"))
-                    print(json.dumps({
-                        "status": "ok",
-                        "authMethod": "local_vault_cache",
-                        "username": cached_user or f"user_{cl.user_id}",
-                        "friends": vault_data,
-                        "totalScanned": len(vault_data)
-                    }, ensure_ascii=False))
-                    return
-                except Exception:
-                    pass
-            print(json.dumps({
-                "status": "fail",
-                "message": f"Saved session scan failed: {e}"
-            }))
+            print(json.dumps({"status": "fail", "message": f"Saved session scan failed: {e}"}))
             return
 
-    # Fresh login requested
-    target_user = args.username.strip().lstrip("@")
-    target_pass = args.password.strip()
-
+    # Fresh 2FA verification requested
     if args.action == "2fa":
         code = args.code.strip()
         try:
             cl.two_factor_login(code)
+            cl.request_timeout = 0
             cl.dump_settings(SESSION_FILE)
-            USER_FILE.write_text(target_user or str(cl.user_id), encoding="utf-8")
-            stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size, workers=args.workers)
+            USER_FILE.write_text(req_user or str(cl.user_id), encoding="utf-8")
+            if safe_req_user:
+                cl.dump_settings(SESSIONS_DIR / f"{safe_req_user}.json")
+
+            print(json.dumps({
+                "status": "ok",
+                "authMethod": "instagrapi_2fa",
+                "username": req_user or str(cl.user_id),
+                "user_id": str(cl.user_id),
+                "message": f"2FA verification successful for @{req_user}."
+            }, ensure_ascii=False))
             return
         except Exception as e:
             print(json.dumps({"status": "fail", "message": f"2FA verification failed: {e}"}))
             return
 
-    if not target_user or not target_pass:
-        print(json.dumps({
-            "status": "fail",
-            "message": "Instagram username and password are required."
-        }))
-        return
+    # Fresh Login requested
+    if args.action == "login":
+        target_user = req_user
+        target_pass = args.password.strip()
 
-    try:
-        cl.login(target_user, target_pass)
-        cl.dump_settings(SESSION_FILE)
-        USER_FILE.write_text(target_user, encoding="utf-8")
-        stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size, workers=args.workers)
-    except TwoFactorRequired:
-        print(json.dumps({
-            "status": "two_factor_required",
-            "username": target_user,
-            "two_factor_identifier": "py_2fa"
-        }))
-    except BadPassword:
-        print(json.dumps({
-            "status": "fail",
-            "message": f"Incorrect password for @{target_user}. Please double-check your credentials."
-        }))
-    except ChallengeRequired:
-        print(json.dumps({
-            "status": "fail",
-            "message": "Instagram security challenge triggered. Open your mobile Instagram app to tap 'This Was Me' to approve login, then try again."
-        }))
-    except FeedbackRequired as e:
-        print(json.dumps({
-            "status": "fail",
-            "code": "RATE_LIMIT",
-            "message": f"Instagram rate limited login: {e}"
-        }))
-    except Exception as e:
-        print(json.dumps({
-            "status": "fail",
-            "message": f"Login failed: {e}"
-        }))
+        if not target_user or not target_pass:
+            print(json.dumps({
+                "status": "fail",
+                "message": "Instagram username and password are required."
+            }))
+            return
+
+        try:
+            cl.login(target_user, target_pass)
+            cl.request_timeout = 0
+            cl.dump_settings(SESSION_FILE)
+            USER_FILE.write_text(target_user, encoding="utf-8")
+            safe_target = "".join(c for c in target_user if c.isalnum() or c in ("_", ".")).lower()
+            cl.dump_settings(SESSIONS_DIR / f"{safe_target}.json")
+
+            # Always return immediate 200 OK for fast responsive UI
+            print(json.dumps({
+                "status": "ok",
+                "authMethod": "instagrapi_login",
+                "username": target_user,
+                "user_id": str(cl.user_id),
+                "message": f"Successfully authenticated as @{target_user}."
+            }, ensure_ascii=False))
+            return
+        except TwoFactorRequired:
+            print(json.dumps({
+                "status": "two_factor_required",
+                "username": target_user,
+                "two_factor_identifier": "py_2fa"
+            }))
+            return
+        except BadPassword:
+            print(json.dumps({
+                "status": "fail",
+                "message": f"Incorrect password for @{target_user}. Please double-check your credentials."
+            }))
+            return
+        except ChallengeRequired:
+            print(json.dumps({
+                "status": "fail",
+                "message": "Instagram security challenge triggered. Open your mobile Instagram app to tap 'This Was Me' to approve login, then try again."
+            }))
+            return
+        except FeedbackRequired as e:
+            print(json.dumps({
+                "status": "fail",
+                "code": "RATE_LIMIT",
+                "message": f"Instagram rate limited login: {e}"
+            }))
+            return
+        except Exception as e:
+            print(json.dumps({
+                "status": "fail",
+                "message": f"Login failed: {e}"
+            }))
+            return
 
 
 if __name__ == "__main__":

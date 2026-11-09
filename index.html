@@ -223,7 +223,7 @@
               🔥 GLOBAL TOP 0.8% TIER
             </span>
             <h2 class="text-xl font-black mt-2 tracking-tight">You are a Reel Demigod</h2>
-            <p id="banner-total-summary" class="text-xs text-white/90 mt-0.5 font-medium">14,892 Reels Exchanged across 6 top friends</p>
+            <p id="banner-total-summary" class="text-xs text-white/90 mt-0.5 font-medium">Loading your Reels data... 🔄</p>
           </div>
           <button onclick="openStoryMode()" class="px-3 py-2 rounded-2xl bg-white text-slate-900 font-black text-[11px] shadow-md hover:scale-105 active:scale-95 transition-transform shrink-0 flex items-center gap-1">
             <span>🎬</span>
@@ -2562,6 +2562,14 @@
       filterFriendsList();
       selectFriend(currentFriendId);
       updateOnlineBanner();
+
+      // Delayed re-trigger to catch race conditions with spectator-auth.js
+      setTimeout(() => {
+        updateGlobalBannerSummary();
+        if (typeof window.triggerGlobalCountRollup === 'function') {
+          window.triggerGlobalCountRollup(500);
+        }
+      }, 800);
 
       // Register Service Worker for offline mobile launch
       if ('serviceWorker' in navigator) {

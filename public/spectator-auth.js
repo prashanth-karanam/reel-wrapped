@@ -599,7 +599,7 @@ async function playLiveThreadCountingProgress(friendsList, statusEl, username) {
 }
 
 async function applyLiveScanSuccess(data, statusEl) {
-  const uname = data.user?.username || 'instagram_user';
+  const uname = data.user?.username || data.username || 'instagram_user';
   if (Array.isArray(data.friends) && data.friends.length > 0) {
     enrichFriendsWithPlayableStreams(data.friends);
     await playLiveThreadCountingProgress(data.friends, statusEl, uname);
@@ -624,7 +624,36 @@ async function applyLiveScanSuccess(data, statusEl) {
       showToast(`🎉 Loaded ${FRIENDS.length} REAL DM threads (${total.toLocaleString()} reels) for @${uname}!`);
     }
   } else {
-    if (typeof showToast === 'function') showToast('✓ Authenticated! No DM threads returned.');
+    // Fast login mode (scan is running in background swarm)
+    setActiveAccountUsername(uname);
+    closeStartLoginGate();
+    if (typeof switchTab === 'function') switchTab('tab-leaderboard');
+    window.initLiveScanStream();
+
+    const banner = document.getElementById('live-scan-progress-banner');
+    if (banner) {
+      banner.classList.remove('hidden');
+      banner.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
+            <span class="text-xs font-black text-purple-200 tracking-wide truncate">⚡ Swarm Scanner Active for @${uname}...</span>
+          </div>
+          <span class="text-[10px] font-mono font-bold bg-white/15 border border-white/20 text-pink-200 px-2.5 py-0.5 rounded-full shrink-0">Pinging Chats...</span>
+        </div>
+        <div class="w-full bg-black/50 rounded-full h-2 overflow-hidden p-0.5 border border-white/10 mt-1">
+          <div class="brand-gradient-bg h-full rounded-full transition-all duration-300" style="width: 15%"></div>
+        </div>
+        <div class="flex items-center justify-between text-[11px] font-mono text-purple-100/90 pt-0.5">
+          <span>Pinging DM threads via 5x parallel workers...</span>
+          <span class="font-bold text-amber-300">Counting live 🔄</span>
+        </div>
+      `;
+    }
+
+    if (typeof showToast === 'function') {
+      showToast(`🚀 Authenticated as @${uname}! Swarm scanning all chats...`);
+    }
   }
 }
 
@@ -1208,7 +1237,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   const activeFriend = FRIENDS.find(x => x.id === window.currentFriendId) || FRIENDS[0];
   if (activeFriend) window.renderGhostRadar(activeFriend);
   if (typeof window.filterFriendsList === 'function') window.filterFriendsList();
+  if (typeof window.updateGlobalBannerSummary === 'function') window.updateGlobalBannerSummary();
   window.triggerGlobalCountRollup(650);
+
+  // Re-trigger banner after a beat in case /api/friends is still loading
+  setTimeout(() => {
+    if (typeof window.updateGlobalBannerSummary === 'function') window.updateGlobalBannerSummary();
+    window.triggerGlobalCountRollup(400);
+  }, 1500);
 
   // Check if server has an active saved session on device (e.g. from local toolkit)
   try {
