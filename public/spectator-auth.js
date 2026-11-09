@@ -602,19 +602,23 @@ async function applyLiveScanSuccess(data, statusEl) {
 
     saveUserAccountVault(uname, 'Live Direct_v2', data.friends);
     FRIENDS = data.friends;
+    window.FRIENDS = data.friends;
     currentFriendId = FRIENDS[0].id;
+    window.currentFriendId = currentFriendId;
     if (typeof saveFriendsToIndexedDB === 'function') await saveFriendsToIndexedDB(FRIENDS);
     if (typeof updateGlobalBannerSummary === 'function') updateGlobalBannerSummary();
     if (typeof filterFriendsList === 'function') filterFriendsList();
     if (typeof selectFriend === 'function') selectFriend(currentFriendId);
-    window.triggerGlobalCountRollup(850);
+    window.triggerGlobalCountRollup(650);
+
+    closeStartLoginGate();
+    if (typeof switchTab === 'function') switchTab('tab-leaderboard');
+    window.initLiveScanStream();
 
     if (typeof showToast === 'function') {
       const total = FRIENDS.reduce((s, x) => s + (x.totalReels || 0), 0);
       showToast(`🎉 Loaded ${FRIENDS.length} REAL DM threads (${total.toLocaleString()} reels) for @${uname}!`);
     }
-    closeStartLoginGate();
-    if (typeof switchTab === 'function') switchTab('tab-ghost');
   } else {
     if (typeof showToast === 'function') showToast('✓ Authenticated! No DM threads returned.');
   }
@@ -1186,12 +1190,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   updateHeaderAccountBadge();
   renderMultiUserListUI();
 
-  // If the user already selected an active account, load its vault automatically
+  // If the user already selected an active account, or if authentic local vault friends are already loaded
   const activeUser = getActiveAccountUsername();
   const savedMap = loadSavedAccountsMap();
   if (activeUser && savedMap[activeUser] && Array.isArray(savedMap[activeUser].friends)) {
     window.FRIENDS = savedMap[activeUser].friends;
     window.currentFriendId = window.FRIENDS[0].id;
+    closeStartLoginGate();
+  } else if (Array.isArray(window.FRIENDS) && window.FRIENDS.length > 0 && window.FRIENDS !== window.DEFAULT_FRIENDS) {
     closeStartLoginGate();
   }
 

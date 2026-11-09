@@ -1054,9 +1054,33 @@ app.post('/api/ig/login', async (req, res) => {
     const isCachedUser = check?.exists && (!cleanUsername || (check.username && cleanUsername.toLowerCase() === check.username.toLowerCase()));
 
     if (isCachedUser || sessionid === 'active_local_session') {
-      console.log(`[ReelWrapped] Using verified local toolkit session for @${check.username}`);
-      const bridgeRes = await runPythonScanBridge(['--action', 'saved_session_scan', '--limit', '10', '--pages', '4']);
-      if (bridgeRes && bridgeRes.status === 'ok') {
+      const activeUser = check?.username || cleanUsername || 'user';
+      console.log(`[ReelWrapped] Using verified local toolkit session for @${activeUser}`);
+
+      // Fast-path: If local vault already has data, respond INSTANTLY and kick off progressive deep scan in background!
+      const vaultPath = path.join(os.homedir(), '.ig_toolkit', 'reel_wrapped_local_vault.json');
+      let cachedFriends: any[] = [];
+      if (fs.existsSync(vaultPath)) {
+        try {
+          cachedFriends = JSON.parse(fs.readFileSync(vaultPath, 'utf8'));
+        } catch (_) {}
+      }
+
+      if (cachedFriends.length > 0) {
+        setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 300);
+        return res.json({
+          status: 'ok',
+          authMethod: 'local_vault_fast',
+          user: { username: activeUser },
+          username: activeUser,
+          friends: cachedFriends,
+          totalScanned: cachedFriends.length,
+        });
+      }
+
+      const bridgeRes = await runPythonScanBridge(['--action', 'saved_session_scan', '--limit', '10', '--batches', '2', '--batch-size', '30']);
+      if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
+        setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 500);
         return res.json(bridgeRes);
       }
     }
@@ -1106,10 +1130,12 @@ app.post('/api/ig/login', async (req, res) => {
       '--username', cleanUsername,
       '--password', password || '',
       '--limit', '10',
-      '--pages', '4',
+      '--batches', '2',
+      '--batch-size', '30',
     ]);
 
-    if (bridgeRes && bridgeRes.status === 'ok') {
+    if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
+      setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 500);
       return res.json(bridgeRes);
     }
 
@@ -1150,10 +1176,12 @@ app.post('/api/ig/2fa', async (req, res) => {
       '--username', cleanUsername,
       '--code', code,
       '--limit', '10',
-      '--pages', '4',
+      '--batches', '2',
+      '--batch-size', '30',
     ]);
 
-    if (bridgeRes && bridgeRes.status === 'ok') {
+    if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
+      setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 500);
       return res.json(bridgeRes);
     }
     return res.status(400).json(bridgeRes || { status: 'fail', message: '2FA verification failed' });

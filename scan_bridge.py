@@ -552,8 +552,12 @@ def main():
     parser.add_argument("--code", default="")
     parser.add_argument("--limit", type=int, default=15)
     parser.add_argument("--batches", type=int, default=6)
+    parser.add_argument("--pages", type=int, default=0, help="Alias for batches")
     parser.add_argument("--batch-size", type=int, default=40)
     args = parser.parse_args()
+
+    if args.pages and args.pages > 0:
+        args.batches = args.pages
 
     cl = get_client()
     cached_user = USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else ""
