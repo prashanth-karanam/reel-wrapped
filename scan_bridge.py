@@ -461,7 +461,7 @@ def enrich_friend_dossier(state, total, friend_idx):
     return detected_niche, top_creators, top_audio
 
 
-def stream_progressive_scan(cl: Client, max_threads: int = 20, batches: int = 50, batch_size: int = 75, workers: int = 4, target_user: str = ""):
+def stream_progressive_scan(cl: Client, max_threads: int = 50, batches: int = 50, batch_size: int = 75, workers: int = 4, target_user: str = ""):
     """
     Pings all conversations in parallel progressive swarm waves until inbox ends.
     Uses bounded concurrent worker threads with safe jitter and adaptive backoff.
@@ -498,6 +498,78 @@ def stream_progressive_scan(cl: Client, max_threads: int = 20, batches: int = 50
                 pass
         raise e
 
+    total_scanned_overall = sum(prior.get("total_msgs_scanned", 0) for prior in saved_threads.values())
+
+    def ingest_thread_items(state, items):
+        nonlocal total_scanned_overall
+        added_count = 0
+        prev_msg_meta = None
+        for item in items:
+            item_id = str(item.get("item_id") or item.get("id") or "")
+            if item_id:
+                if item_id in state["seen_ids"]:
+                    continue
+                state["seen_ids"].add(item_id)
+
+            added_count += 1
+            state["total_msgs_scanned"] += 1
+            total_scanned_overall += 1
+
+            is_me = str(item.get("user_id", "")) == my_pk
+            dt = parse_timestamp(item.get("timestamp", 0))
+            ts_sec = dt.timestamp()
+
+            if prev_msg_meta and prev_msg_meta[1] != is_me:
+                delta = abs(prev_msg_meta[0] - ts_sec)
+                if 1 <= delta <= 3600:
+                    state["reflex_deltas"].append(delta)
+            prev_msg_meta = (ts_sec, is_me)
+
+            reactions = item.get("reactions", {}).get("emojis", [])
+            for r in reactions:
+                em = r.get("emoji")
+                if em:
+                    state["emoji_counter"][em] += 1
+
+            if is_reel(item):
+                if is_me:
+                    state["sent"] += 1
+                else:
+                    state["rcvd"] += 1
+                state["hourly"][dt.hour] += 1
+                state["daily_dates"].add(dt.strftime("%Y-%m-%d"))
+
+                meta = extract_reel_metadata(item)
+                c = meta["creator"]
+                if c and c != "viral.creator":
+                    state["creator_counter"][c] += 1
+                    if meta["creator_avatar"] and c not in state["creator_avatars"]:
+                        state["creator_avatars"][c] = meta["creator_avatar"]
+
+                if meta["audio_title"]:
+                    state["audio_counter"][(meta["audio_title"], meta["audio_artist"])] += 1
+
+                if meta["caption"]:
+                    tags = re.findall(r"#([a-zA-Z0-9_]{2,30})", meta["caption"])
+                    for tag in tags:
+                        state["hashtag_counter"][f"#{tag.lower()}"] += 1
+
+                if len(state["ghost_messages"]) < 16:
+                    state["ghost_messages"].insert(0, {
+                        "time": dt.strftime("%H:%M"),
+                        "sender": "You" if is_me else state["name"][:16],
+                        "is_me": is_me,
+                        "is_reel": True,
+                        "text_or_url": meta["reel_url"],
+                        "shortcode": meta.get("shortcode", ""),
+                        "video_url": meta.get("video_url", ""),
+                        "creator": f"@{c}",
+                        "caption": meta["caption"][:80] if meta["caption"] else "",
+                        "audio_title": meta.get("audio_title", ""),
+                        "audio_artist": meta.get("audio_artist", ""),
+                    })
+        return added_count
+
     # State per thread
     thread_states = {}
     for idx, t in enumerate(raw_threads, 1):
@@ -527,8 +599,8 @@ def stream_progressive_scan(cl: Client, max_threads: int = 20, batches: int = 50
         prior = saved_threads.get(t_id, {})
         prior_seen_ids = set(prior.get("seen_ids", []))
 
-        thread_states[t_id] = {
-            "id": f"friend_{idx}",
+        st = {
+            "id": prior.get("id") or f"friend_{idx}",
             "t_id": t_id,
             "name": name,
             "handle": handle,
@@ -551,6 +623,41 @@ def stream_progressive_scan(cl: Client, max_threads: int = 20, batches: int = 50
             "total_msgs_scanned": prior.get("total_msgs_scanned", 0),
             "seen_ids": prior_seen_ids,
         }
+        # Ingest top items immediately to catch any newly arrived messages/reels right now
+        top_items = t.get("items") or []
+        if top_items:
+            ingest_thread_items(st, top_items)
+
+        thread_states[t_id] = st
+
+    # Preserve any existing conversations from saved checkpoint that were not returned in top inbox slice
+    for st_id, prior in saved_threads.items():
+        if st_id not in thread_states:
+            prior_seen_ids = set(prior.get("seen_ids", []))
+            thread_states[st_id] = {
+                "id": prior.get("id") or f"friend_{len(thread_states) + 1}",
+                "t_id": st_id,
+                "name": prior.get("name", "Friend"),
+                "handle": prior.get("handle", "@user"),
+                "avatar": prior.get("avatar", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80"),
+                "seen_status": prior.get("seen_status", "Seen"),
+                "unseen_count": prior.get("unseen_count", 0),
+                "sent": prior.get("sent", 0),
+                "rcvd": prior.get("rcvd", 0),
+                "hourly": prior.get("hourly", [0] * 24),
+                "daily_dates": set(prior.get("daily_dates", [])),
+                "emoji_counter": Counter(prior.get("emoji_counter", {})),
+                "creator_counter": Counter(prior.get("creator_counter", {})),
+                "creator_avatars": prior.get("creator_avatars", {}),
+                "audio_counter": Counter({(row[0], row[1]): row[2] for row in prior.get("audio_counter_list", []) if isinstance(row, (list, tuple)) and len(row) >= 3}),
+                "hashtag_counter": Counter(prior.get("hashtag_counter", {})),
+                "ghost_messages": prior.get("ghost_messages", []),
+                "reflex_deltas": prior.get("reflex_deltas", []),
+                "cursor": prior.get("cursor", None),
+                "exhausted": prior.get("exhausted", True),
+                "total_msgs_scanned": prior.get("total_msgs_scanned", 0),
+                "seen_ids": prior_seen_ids,
+            }
 
     def fetch_thread_slice(t_id, state_cursor):
         params = {"direction": "older", "limit": str(batch_size)}
@@ -682,73 +789,7 @@ def stream_progressive_scan(cl: Client, max_threads: int = 20, batches: int = 50
                         state["exhausted"] = True
                         continue
 
-                    prev_msg_meta = None
-                    new_items_in_slice = 0
-
-                    for item in items:
-                        item_id = str(item.get("item_id") or item.get("id") or "")
-                        if item_id:
-                            if item_id in state["seen_ids"]:
-                                continue
-                            state["seen_ids"].add(item_id)
-
-                        new_items_in_slice += 1
-                        state["total_msgs_scanned"] += 1
-                        total_scanned_overall += 1
-
-                        is_me = str(item.get("user_id", "")) == my_pk
-                        dt = parse_timestamp(item.get("timestamp", 0))
-                        ts_sec = dt.timestamp()
-
-                        if prev_msg_meta and prev_msg_meta[1] != is_me:
-                            delta = abs(prev_msg_meta[0] - ts_sec)
-                            if 1 <= delta <= 3600:
-                                state["reflex_deltas"].append(delta)
-                        prev_msg_meta = (ts_sec, is_me)
-
-                        reactions = item.get("reactions", {}).get("emojis", [])
-                        for r in reactions:
-                            em = r.get("emoji")
-                            if em:
-                                state["emoji_counter"][em] += 1
-
-                        if is_reel(item):
-                            if is_me:
-                                state["sent"] += 1
-                            else:
-                                state["rcvd"] += 1
-                            state["hourly"][dt.hour] += 1
-                            state["daily_dates"].add(dt.strftime("%Y-%m-%d"))
-
-                            meta = extract_reel_metadata(item)
-                            c = meta["creator"]
-                            if c and c != "viral.creator":
-                                state["creator_counter"][c] += 1
-                                if meta["creator_avatar"] and c not in state["creator_avatars"]:
-                                    state["creator_avatars"][c] = meta["creator_avatar"]
-
-                            if meta["audio_title"]:
-                                state["audio_counter"][(meta["audio_title"], meta["audio_artist"])] += 1
-
-                            if meta["caption"]:
-                                tags = re.findall(r"#([a-zA-Z0-9_]{2,30})", meta["caption"])
-                                for tag in tags:
-                                    state["hashtag_counter"][f"#{tag.lower()}"] += 1
-
-                            if len(state["ghost_messages"]) < 16:
-                                state["ghost_messages"].append({
-                                    "time": dt.strftime("%H:%M"),
-                                    "sender": "You" if is_me else state["name"][:16],
-                                    "is_me": is_me,
-                                    "is_reel": True,
-                                    "text_or_url": meta["reel_url"],
-                                    "shortcode": meta.get("shortcode", ""),
-                                    "video_url": meta.get("video_url", ""),
-                                    "creator": f"@{c}",
-                                    "caption": meta["caption"][:80] if meta["caption"] else "",
-                                    "audio_title": meta.get("audio_title", ""),
-                                    "audio_artist": meta.get("audio_artist", ""),
-                                })
+                    new_items_in_slice = ingest_thread_items(state, items)
 
                     # Instagram returns oldest_cursor to continue backward pagination even when has_older is omitted
                     if oldest and oldest != state["cursor"] and new_items_in_slice > 0:
@@ -834,7 +875,7 @@ def main():
     parser.add_argument("--password", default="")
     parser.add_argument("--code", default="")
     parser.add_argument("--url", default="", help="Instagram reel URL or shortcode")
-    parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--batches", type=int, default=50)
     parser.add_argument("--pages", type=int, default=0, help="Alias for batches")
     parser.add_argument("--batch-size", type=int, default=75)

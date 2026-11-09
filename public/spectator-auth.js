@@ -1,5 +1,5 @@
 // ============================================================================
-// REEL WRAPPED '25 • MULTI-USER LOGIN GATE, IN-APP REEL SPECTATOR & LIVE SYNC
+// REEL WRAPPED '26 • MULTI-USER LOGIN GATE, IN-APP REEL SPECTATOR & LIVE SYNC
 // 100% Local Privacy • Multi-Account Vault Switcher • Zero External Redirects
 // ============================================================================
 
@@ -488,7 +488,7 @@ window.renderLeaderboard = function(list) {
           
           <div class="space-y-1.5 text-center">
             <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black bg-pink-500/20 text-pink-300 border border-pink-400/30 uppercase tracking-wider mb-1">
-              ✨ 2025 INSTAGRAM REEL WRAPPED
+              ✨ 2026 INSTAGRAM REEL WRAPPED
             </div>
             <h3 class="text-lg font-black tracking-tight">${activeUser ? `@${activeUser}'s DM Stats Are Waiting` : 'Your DM Reel Stats Are Waiting'}</h3>
             <p class="text-xs text-purple-200/90 max-w-sm mx-auto leading-relaxed">
@@ -1366,7 +1366,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 🎬
               </div>
               <div>
-                <h2 class="text-base font-black tracking-tight leading-none">REEL WRAPPED '25</h2>
+                <h2 class="text-base font-black tracking-tight leading-none">REEL WRAPPED '26</h2>
                 <span class="text-[10px] font-mono opacity-90">100% Private • Direct to Instagram</span>
               </div>
             </div>

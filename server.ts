@@ -562,8 +562,55 @@ function broadcastScanState(event: string, data: any) {
 }
 
 let activeScanChild: any = null;
+let bgSyncTimer: NodeJS.Timeout | null = null;
+let lastBgSyncTime = 0;
+let nextBgSyncTargetTime = 0;
+
+function scheduleNextBackgroundSync(delayMs = 35000) {
+  if (bgSyncTimer) clearTimeout(bgSyncTimer);
+  nextBgSyncTargetTime = Date.now() + delayMs;
+
+  bgSyncTimer = setTimeout(async () => {
+    try {
+      const userTxtPath = path.join(os.homedir(), '.ig_toolkit', 'user.txt');
+      const diskUser = fs.existsSync(userTxtPath) ? fs.readFileSync(userTxtPath, 'utf8').trim() : '';
+      const activeUser = currentScanState.activeUser || diskUser;
+
+      if (!activeUser || activeUser === 'demo_syndicate' || activeUser === 'creator_guest') {
+        scheduleNextBackgroundSync(35000);
+        return;
+      }
+
+      const safeU = activeUser.toLowerCase().replace(/[^a-z0-9_.]/g, '');
+      const sessFile = path.join(os.homedir(), '.ig_toolkit', 'sessions', `${safeU}.json`);
+      const mainSess = path.join(os.homedir(), '.ig_toolkit', 'session.json');
+      const hasSession = fs.existsSync(sessFile) || fs.existsSync(mainSess);
+
+      if (!hasSession) {
+        scheduleNextBackgroundSync(45000);
+        return;
+      }
+
+      if (currentScanState.isScanning && activeScanChild) {
+        scheduleNextBackgroundSync(20000);
+        return;
+      }
+
+      lastBgSyncTime = Date.now();
+      console.log(`[ReelWrapped BG Refresher] Auto-refreshing inbox for new conversations & incoming reels for @${activeUser}...`);
+      triggerBackgroundDeepScan(50, 20, 75, 4, activeUser);
+    } catch (e) {
+      console.warn('[ReelWrapped BG Refresher Error]:', e);
+      scheduleNextBackgroundSync(45000);
+    }
+  }, delayMs);
+}
 
 function stopActiveScan() {
+  if (bgSyncTimer) {
+    clearTimeout(bgSyncTimer);
+    bgSyncTimer = null;
+  }
   if (activeScanChild) {
     try {
       activeScanChild.kill();
@@ -573,7 +620,7 @@ function stopActiveScan() {
   currentScanState.isScanning = false;
 }
 
-function triggerBackgroundDeepScan(limit = 20, batches = 50, batchSize = 75, workers = 4, targetUser = ''): boolean {
+function triggerBackgroundDeepScan(limit = 50, batches = 50, batchSize = 75, workers = 4, targetUser = ''): boolean {
   const userTxtPath = path.join(os.homedir(), '.ig_toolkit', 'user.txt');
   const diskUser = fs.existsSync(userTxtPath) ? fs.readFileSync(userTxtPath, 'utf8').trim() : '';
   const effectiveUser = targetUser || diskUser || currentScanState.activeUser || '';
@@ -679,6 +726,8 @@ function triggerBackgroundDeepScan(limit = 20, batches = 50, batchSize = 75, wor
       currentScanState.status = code === 0 ? 'complete' : 'idle';
     }
     broadcastScanState('done', currentScanState);
+    // Auto-schedule continuous background refresh in 35 seconds
+    scheduleNextBackgroundSync(35000);
   });
 
   child.on('error', (err) => {
@@ -687,6 +736,7 @@ function triggerBackgroundDeepScan(limit = 20, batches = 50, batchSize = 75, wor
     currentScanState.status = 'error';
     currentScanState.error = err.message;
     broadcastScanState('error', currentScanState);
+    scheduleNextBackgroundSync(45000);
   });
 
   return true;
@@ -755,8 +805,22 @@ app.get('/api/ig/live-scan-status', (_req, res) => {
   res.json(currentScanState);
 });
 
+app.get('/api/ig/bg-sync-status', (_req, res) => {
+  const now = Date.now();
+  const nextInSec = Math.max(0, Math.round((nextBgSyncTargetTime - now) / 1000));
+  res.json({
+    status: 'active',
+    activeUser: currentScanState.activeUser,
+    isScanning: currentScanState.isScanning,
+    lastSyncTime: lastBgSyncTime ? new Date(lastBgSyncTime).toISOString() : null,
+    nextSyncInSec: nextInSec,
+    totalReels: currentScanState.totalReels,
+    friendCount: currentScanState.friends ? currentScanState.friends.length : 0,
+  });
+});
+
 app.post('/api/ig/start-deep-scan', (req, res) => {
-  const limit = Math.min(30, Math.max(5, Number(req.body?.limit) || 20));
+  const limit = Math.min(100, Math.max(5, Number(req.body?.limit) || 50));
   const batches = Math.min(200, Math.max(2, Number(req.body?.batches) || 50));
   const batchSize = Math.min(100, Math.max(10, Number(req.body?.batchSize) || 75));
   const workers = Math.min(6, Math.max(2, Number(req.body?.workers) || 4));
@@ -917,7 +981,7 @@ app.post('/api/ig/switch-account', async (req, res) => {
 
     // 6. If user has a valid session, auto-trigger background deep-scan for this specific user
     if (hasSession) {
-      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, rawUser), 400);
+      setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, rawUser), 400);
     }
 
     return res.json({
@@ -996,7 +1060,7 @@ app.post('/api/ig/saved-session-scan', async (req, res) => {
         currentScanState.totalReels = scanResult.friends.reduce((acc: number, f: any) => acc + (Number(f.totalReels) || 0), 0);
       }
       // Auto-trigger continuous deep-scan in background for this specific user
-      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, activeUser), 500);
+      setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, activeUser), 500);
       return res.json(scanResult);
     }
     return res.status(400).json(scanResult || { status: 'fail', message: 'Could not load saved session.' });
@@ -1298,7 +1362,7 @@ app.post('/api/ig/login', async (req, res) => {
           currentScanState.friends = cachedFriends;
           currentScanState.activeUser = activeUser;
           currentScanState.totalReels = cachedFriends.reduce((acc: number, f: any) => acc + (Number(f.totalReels) || 0), 0);
-          setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, activeUser), 300);
+          setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, activeUser), 300);
           return res.json({
             status: 'ok',
             authMethod: 'local_vault_fast',
@@ -1313,7 +1377,7 @@ app.post('/api/ig/login', async (req, res) => {
         if (bridgeRes2 && (bridgeRes2.status === 'ok' || bridgeRes2.type === 'complete')) {
           if (bridgeRes2.friends) currentScanState.friends = bridgeRes2.friends;
           currentScanState.activeUser = activeUser;
-          setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, activeUser), 500);
+          setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, activeUser), 500);
           return res.json(bridgeRes2);
         }
       }
@@ -1389,7 +1453,7 @@ app.post('/api/ig/login', async (req, res) => {
       currentScanState.scannedMessages = 0;
 
       // Trigger background swarm scanning for live progressive feed for this specific user
-      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, cleanUsername), 500);
+      setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, cleanUsername), 500);
 
       return res.json({
         status: 'ok',
@@ -1436,7 +1500,7 @@ app.post('/api/ig/2fa', async (req, res) => {
     ]);
 
     if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
-      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, cleanUsername), 500);
+      setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, cleanUsername), 500);
       return res.json(bridgeRes);
     }
     return res.status(400).json(bridgeRes || { status: 'fail', message: '2FA verification failed' });
@@ -1585,11 +1649,13 @@ async function startServer() {
     }
 
     const sessionPath = path.join(toolkitDir, 'session.json');
-    if (fs.existsSync(sessionPath)) {
+    if (fs.existsSync(sessionPath) && activeUser && activeUser !== 'demo_syndicate') {
       setTimeout(() => {
-        console.log(`[ReelWrapped] Auto-starting high-throughput swarm deep scan on boot for @${activeUser} (20 chats, 75 msgs/load, 4 workers)...`);
-        triggerBackgroundDeepScan(20, 50, 75, 4, activeUser);
+        console.log(`[ReelWrapped] Auto-starting high-throughput swarm deep scan on boot for @${activeUser} (50 chats, 75 msgs/load, 4 workers)...`);
+        triggerBackgroundDeepScan(50, 50, 75, 4, activeUser);
       }, 1200);
+    } else {
+      scheduleNextBackgroundSync(15000);
     }
   }
 
