@@ -230,19 +230,26 @@ window.animateNumberWithLoadingSymbol = function(el, targetValue, prefix = '', s
 };
 
 window.triggerGlobalCountRollup = function(durationMs = 700) {
-  const totalReels = (window.FRIENDS || []).reduce((acc, f) => acc + (f.totalReels || 0), 0);
+  const list = (window.FRIENDS && window.FRIENDS.length > 0) ? window.FRIENDS : (typeof FRIENDS !== 'undefined' && FRIENDS.length ? FRIENDS : []);
+  if (!list || !list.length) return;
+
+  const totalReels = list.reduce((acc, f) => acc + (f.totalReels || 0), 0);
+  const maxStreak = list.reduce((acc, f) => Math.max(acc, f.bestStreak || f.streak || 0), 0);
   const summaryEl = document.getElementById('banner-total-summary');
-  if (summaryEl) {
+  const streakEl = document.getElementById('banner-peak-streak');
+
+  if (summaryEl && totalReels > 0) {
     window.animateNumberWithLoadingSymbol(
       summaryEl,
       totalReels,
       '',
-      ` Reels Exchanged across ${(window.FRIENDS || []).length} top friends`,
+      ` Reels Exchanged across ${list.length} top friends`,
       durationMs
     );
   }
+  if (streakEl) streakEl.innerText = `${maxStreak} Days`;
 
-  const f = (window.FRIENDS || []).find(x => x.id === window.currentFriendId) || (window.FRIENDS || [])[0];
+  const f = list.find(x => x.id === window.currentFriendId) || list[0];
   if (f) {
     window.animateNumberWithLoadingSymbol(document.getElementById('dossier-total-reels'), f.totalReels, '', '', durationMs);
     window.animateNumberWithLoadingSymbol(document.getElementById('story-total-count'), f.totalReels, '', '', durationMs);
@@ -312,6 +319,10 @@ window.renderLeaderboard = function(list) {
 
   container.innerHTML = list.map(f => {
     const medal = f.rank === 1 ? '🥇' : f.rank === 2 ? '🥈' : f.rank === 3 ? '🥉' : `#${f.rank}`;
+    const streakDisplay = (f.activeStreak && f.activeStreak > 0)
+      ? `<span class="text-[10px] font-bold text-amber-600 block">🔥 ${f.activeStreak}d streak</span>`
+      : `<span class="text-[10px] font-bold text-slate-500 block">⚡ ${f.bestStreak || f.streak || 1}d peak</span>`;
+
     return `
       <div onclick="openFriendDossier('${f.id}')" class="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-sm hover:border-purple-300 hover:shadow-md transition-all cursor-pointer active:scale-[0.99]">
         <div class="flex items-center justify-between gap-2.5">
@@ -325,13 +336,13 @@ window.renderLeaderboard = function(list) {
                 <h3 class="text-sm font-black text-slate-900 truncate">${f.name}</h3>
                 <span class="px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-50 text-purple-700 shrink-0">${f.statusTag}</span>
               </div>
-              <p class="text-[11px] text-slate-500 font-medium truncate">${f.handle} • ${f.topGenre}</p>
+              <p class="text-[11px] text-slate-500 font-medium truncate">${f.handle} • ${f.topGenre || 'Trending Reels Creator'}</p>
             </div>
           </div>
 
           <div class="text-right shrink-0">
             <span data-reel-count="${f.totalReels}" class="text-sm font-black font-mono text-slate-900 block">${f.totalReels.toLocaleString()}</span>
-            <span class="text-[10px] font-bold text-amber-600 block">🔥 ${f.streak}d streak</span>
+            ${streakDisplay}
           </div>
         </div>
 
@@ -1248,4 +1259,132 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
     }
   } catch (_) {}
+
+  // Initialize live background deep-scan stream
+  window.initLiveScanStream();
 });
+
+// ============================================================================
+// 6. LIVE BACKGROUND PROGRESSIVE SCAN STREAMING & DEEP PING ENGINE
+// ============================================================================
+let liveScanEventSource = null;
+let liveScanPollInterval = null;
+
+window.initLiveScanStream = function() {
+  const banner = document.getElementById('live-scan-progress-banner');
+  const titleEl = document.getElementById('live-scan-title');
+  const batchEl = document.getElementById('live-scan-batch-badge');
+  const barEl = document.getElementById('live-scan-progress-bar');
+  const msgCountEl = document.getElementById('live-scan-msg-count');
+  const reelCountEl = document.getElementById('live-scan-reel-count');
+
+  function updateLiveScanUI(state) {
+    if (!state) return;
+    if (state.isScanning) {
+      if (banner) banner.classList.remove('hidden');
+      if (titleEl) titleEl.innerText = state.status || '⚡ Pinging older DM history across chats...';
+      if (batchEl) batchEl.innerText = `Batch ${state.batch || 1}/${state.totalBatches || 8}`;
+      const pct = Math.min(100, Math.max(8, Math.round(((state.batch || 1) / (state.totalBatches || 8)) * 100)));
+      if (barEl) barEl.style.width = `${pct}%`;
+      if (msgCountEl) msgCountEl.innerText = `Scanned ${(state.scannedMessages || 0).toLocaleString()} messages across chats`;
+      if (reelCountEl) reelCountEl.innerText = `${(state.totalReels || 0).toLocaleString()} reels found`;
+
+      if (Array.isArray(state.friends) && state.friends.length > 0) {
+        enrichFriendsWithPlayableStreams(state.friends);
+        window.FRIENDS = state.friends;
+        if (typeof FRIENDS !== 'undefined') FRIENDS = state.friends;
+        if (typeof window.updateGlobalBannerSummary === 'function') window.updateGlobalBannerSummary();
+        if (typeof window.filterFriendsList === 'function') window.filterFriendsList();
+        const activeFriend = (window.FRIENDS || []).find(x => x.id === window.currentFriendId) || window.FRIENDS[0];
+        if (activeFriend && typeof window.selectFriend === 'function') {
+          window.selectFriend(activeFriend.id);
+        }
+      }
+    } else if (state.status === 'complete' && state.totalReels > 0) {
+      if (banner) {
+        banner.classList.remove('hidden');
+        banner.innerHTML = `
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-emerald-400 font-bold">✅</span>
+              <span class="text-xs font-black text-emerald-200 uppercase tracking-wider">100% Deep-Scan Synced</span>
+            </div>
+            <button type="button" onclick="window.triggerDeeperScan()" class="px-2.5 py-1 rounded-lg brand-gradient-bg text-white text-[10px] font-black shadow hover:opacity-95 transition-all">
+              🔄 Scan Deeper (+40 msgs)
+            </button>
+          </div>
+          <div class="text-[11px] font-mono text-purple-200">
+            Fully scanned ${(state.scannedMessages || 0).toLocaleString()} messages • ${(state.totalReels || 0).toLocaleString()} reels cataloged across ${(state.friends || []).length} friends
+          </div>
+        `;
+      }
+    }
+  }
+
+  // 1. Server-Sent Events (SSE)
+  if (typeof EventSource !== 'undefined') {
+    try {
+      if (liveScanEventSource) liveScanEventSource.close();
+      liveScanEventSource = new EventSource('/api/ig/live-scan-stream');
+      liveScanEventSource.onmessage = (e) => {
+        try { updateLiveScanUI(JSON.parse(e.data)); } catch (_) {}
+      };
+      liveScanEventSource.addEventListener('progress', (e) => {
+        try { updateLiveScanUI(JSON.parse(e.data)); } catch (_) {}
+      });
+      liveScanEventSource.addEventListener('complete', (e) => {
+        try { updateLiveScanUI(JSON.parse(e.data)); } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
+  // 2. Polling fallback (vital for mobile WebView)
+  if (liveScanPollInterval) clearInterval(liveScanPollInterval);
+  liveScanPollInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/ig/live-scan-status');
+      if (res.ok) {
+        const state = await res.json();
+        updateLiveScanUI(state);
+      }
+    } catch (_) {}
+  }, 2500);
+};
+
+window.triggerDeeperScan = async function() {
+  if (typeof showToast === 'function') showToast('🔄 Pinging older DM batches across all chats...');
+  try {
+    const banner = document.getElementById('live-scan-progress-banner');
+    if (banner) {
+      banner.classList.remove('hidden');
+      banner.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
+            <span id="live-scan-title" class="text-xs font-black text-purple-200 tracking-wide truncate">⚡ Pinging older DM history across chats...</span>
+          </div>
+          <span id="live-scan-batch-badge" class="text-[10px] font-mono font-bold bg-white/15 border border-white/20 text-pink-200 px-2.5 py-0.5 rounded-full shrink-0">Starting...</span>
+        </div>
+        <div class="w-full bg-black/50 rounded-full h-2 overflow-hidden p-0.5 border border-white/10">
+          <div id="live-scan-progress-bar" class="brand-gradient-bg h-full rounded-full transition-all duration-300" style="width: 10%"></div>
+        </div>
+        <div class="flex items-center justify-between text-[11px] font-mono text-purple-100/90 pt-0.5">
+          <span id="live-scan-msg-count">Connecting to Instagram API...</span>
+          <span id="live-scan-reel-count" class="font-bold text-amber-300">Scanning...</span>
+        </div>
+      `;
+    }
+
+    const res = await fetch('/api/ig/start-deep-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit: 15, batches: 8, batchSize: 40 })
+    });
+    const data = await res.json();
+    if (data.status === 'started' || data.status === 'already_running') {
+      window.initLiveScanStream();
+    }
+  } catch (err) {
+    if (typeof showToast === 'function') showToast('⚠️ Deep scan error: ' + (err.message || err));
+  }
+};

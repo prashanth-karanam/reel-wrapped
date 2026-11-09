@@ -3,6 +3,7 @@ import sys
 import io
 import time
 import json
+import re
 import argparse
 import datetime
 from pathlib import Path
@@ -94,11 +95,19 @@ def is_reel(item: dict) -> bool:
     return False
 
 
-def compute_streak(dates_set) -> int:
-    if not dates_set:
-        return 0
+def compute_streaks(daily_dates_set) -> tuple[int, int, str]:
+    """
+    Computes (active_streak, longest_streak, label).
+    Streak is active if latest reel was today or yesterday.
+    Distinguishes active streak from all-time longest peak streak.
+    """
+    if not daily_dates_set:
+        return 0, 0, "No active streak"
     try:
-        sorted_dates = sorted(datetime.date.fromisoformat(d) for d in dates_set)
+        sorted_dates = sorted(set(datetime.date.fromisoformat(d) for d in daily_dates_set if d))
+        if not sorted_dates:
+            return 0, 0, "No active streak"
+
         longest = 1
         current = 1
         for i in range(1, len(sorted_dates)):
@@ -107,31 +116,166 @@ def compute_streak(dates_set) -> int:
                 current += 1
                 if current > longest:
                     longest = current
-            elif sorted_dates[i] != sorted_dates[i - 1]:
+            elif diff > 1:
                 current = 1
-        return longest
+
+        today = datetime.date.today()
+        latest = sorted_dates[-1]
+        days_gap = (today - latest).days
+
+        if days_gap <= 1:
+            active = 1
+            for i in range(len(sorted_dates) - 1, 0, -1):
+                if (sorted_dates[i] - sorted_dates[i - 1]).days == 1:
+                    active += 1
+                else:
+                    break
+            if active > longest:
+                longest = active
+            label = f"🔥 {active}d active streak (Peak: {longest}d)"
+        else:
+            active = 0
+            label = f"⚡ {longest}d peak streak (last active {days_gap}d ago)"
+
+        return active, longest, label
     except Exception:
-        return 1
+        return 0, 1, "⚡ 1d peak streak"
 
 
-def compile_dossiers(cl: Client, max_threads: int = 10, max_pages_per_thread: int = 4) -> list:
+def get_creator_niche(handle: str, caption: str = "") -> str:
+    combined = f"{handle.lower()} {caption.lower()}"
+    if any(x in combined for x in ["meme", "funny", "humor", "comedy", "jokes", "zone", "rofl", "lol", "suburban", "sarcasm", "shitpost"]):
+        return "Viral Memes & Comedy"
+    if any(x in combined for x in ["hub", "campus", "college", "univ", "student", "diaries", "exam", "hostel", "school", "btech", "srm"]):
+        return "Campus & Student Life"
+    if any(x in combined for x in ["edit", "phonk", "amv", "vfx", "aesthetic", "cinematic", "audio", "slowed", "reverb"]):
+        return "Aesthetic Edits & Phonk"
+    if any(x in combined for x in ["anim", "manga", "anime", "weeb", "otaku", "yugen", "naruto", "jujutsu", "onepiece"]):
+        return "Anime & Manga Arts"
+    if any(x in combined for x in ["tech", "ai", "code", "dev", "crypto", "gadget", "software", "python", "future"]):
+        return "Tech & AI Innovations"
+    if any(x in combined for x in ["cook", "food", "chef", "recipe", "bake", "streetfood", "delicious", "tasty"]):
+        return "Food & Street Recipes"
+    if any(x in combined for x in ["gym", "fit", "lift", "workout", "muscle", "bodybuild", "calisthenic", "shred"]):
+        return "Fitness & Motivation"
+    if any(x in combined for x in ["film", "movie", "cinema", "scene", "actor", "hollywood", "bollywood", "tollywood"]):
+        return "Cinema & Film Cuts"
+    if any(x in combined for x in ["dance", "choreography", "dancer", "steps"]):
+        return "Dance & Performance"
+    if any(x in combined for x in ["game", "gaming", "stream", "playstation", "xbox", "gta", "bgmi", "valorant"]):
+        return "Gaming & Esports"
+    if any(x in combined for x in ["auto", "car", "supercar", "bike", "motor", "drift", "speed"]):
+        return "Supercars & Automotive"
+    if any(x in combined for x in ["travel", "wander", "explore", "nature", "mountains", "beach", "adventure"]):
+        return "Travel & Exploration"
+    if any(x in combined for x in ["fashion", "style", "outfit", "drip", "makeup", "beauty"]):
+        return "Fashion & Drip Trends"
+    clean_handle = handle.strip().lstrip("@")
+    return f"Trending @{clean_handle} Curations"
+
+
+def extract_reel_metadata(item: dict) -> dict:
+    """Extracts authentic creator handle, avatar, url, caption, audio, and hashtag candidates."""
+    creator = "viral.creator"
+    creator_avatar = ""
+    reel_url = "https://instagram.com/reels/"
+    caption = ""
+    audio_title = ""
+    audio_artist = ""
+
+    # 1. From xma_clip / xma_media_share
+    for k in ["xma_clip", "xma_media_share"]:
+        xl = item.get(k) or []
+        if isinstance(xl, list) and xl:
+            x0 = xl[0]
+            if isinstance(x0, dict):
+                c = x0.get("header_title_text")
+                if c and not str(c).startswith("http") and len(str(c)) < 35:
+                    creator = str(c).strip().lstrip("@")
+                icon = x0.get("header_icon_url") or x0.get("preview_url")
+                if icon:
+                    creator_avatar = str(icon)
+                u = x0.get("target_url")
+                if u:
+                    reel_url = str(u)
+                cap = x0.get("caption_body_text") or x0.get("title_text")
+                if cap and cap != "Message unavailable":
+                    caption = str(cap)
+                # Audio extraction
+                sub = x0.get("subtitle_text")
+                if sub and sub != "None" and sub != "Message unavailable":
+                    audio_title = str(sub)
+                attr = x0.get("quoted_attribution_text")
+                if attr:
+                    audio_artist = str(attr)
+            break
+
+    # 2. From direct clip / media_share / felix_share
+    for k in ["clip", "media_share", "felix_share"]:
+        val = item.get(k)
+        if isinstance(val, dict):
+            u_dict = val.get("user") or {}
+            if u_dict.get("username"):
+                creator = u_dict.get("username")
+            if u_dict.get("profile_pic_url"):
+                creator_avatar = u_dict.get("profile_pic_url")
+            cap_dict = val.get("caption") or {}
+            if cap_dict.get("text"):
+                caption = cap_dict.get("text")
+            # Clips metadata audio
+            c_meta = val.get("clips_metadata") or {}
+            m_info = c_meta.get("music_info", {}).get("music_asset_info", {})
+            if m_info.get("title"):
+                audio_title = m_info.get("title")
+                audio_artist = m_info.get("display_artist", "")
+            orig_info = c_meta.get("original_sound_info") or {}
+            if orig_info.get("original_audio_title"):
+                audio_title = orig_info.get("original_audio_title")
+                audio_artist = orig_info.get("ig_artist", {}).get("username", creator)
+
+    # 3. Direct item text
+    if not caption and item.get("text"):
+        caption = str(item.get("text"))
+
+    if not audio_title and creator != "viral.creator":
+        audio_title = f"Original Audio • @{creator}"
+        audio_artist = f"@{creator}"
+
+    return {
+        "creator": creator,
+        "creator_avatar": creator_avatar,
+        "reel_url": reel_url,
+        "caption": caption,
+        "audio_title": audio_title or "Trending Reel Sound",
+        "audio_artist": audio_artist or "Instagram Reels",
+    }
+
+
+def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6, batch_size: int = 40):
+    """
+    Pings all conversations in progressive batches.
+    Emits continuous single-line JSON progress events to stdout so the UI
+    increments live in real time while scanning older messages.
+    """
     my_pk = str(cl.user_id)
+    now = datetime.datetime.now()
+
     try:
         inbox = cl.private_request(f"direct_v2/inbox/?limit={max_threads}")
-        threads = inbox.get("inbox", {}).get("threads", [])
+        raw_threads = inbox.get("inbox", {}).get("threads", [])
     except Exception as e:
-        # Fallback to local vault cache if available
         if VAULT_JSON_FILE.exists():
             try:
-                return json.loads(VAULT_JSON_FILE.read_text(encoding="utf-8"))
+                cached = json.loads(VAULT_JSON_FILE.read_text(encoding="utf-8"))
+                print(json.dumps({"type": "complete", "scannedMessages": 0, "totalReels": sum(x.get("totalReels", 0) for x in cached), "friends": cached}))
+                return
             except Exception:
                 pass
         raise e
 
-    dossiers = []
-    now = datetime.datetime.now()
-
-    for idx, t in enumerate(threads, 1):
+    # State per thread
+    thread_states = {}
+    for idx, t in enumerate(raw_threads, 1):
         t_id = t.get("thread_id")
         users = t.get("users", [])
         other_user = users[0] if users else {}
@@ -155,159 +299,260 @@ def compile_dossiers(cl: Client, max_threads: int = 10, max_pages_per_thread: in
                 diff_m = max(1, int((now - seen_ts).total_seconds() / 60))
                 seen_status = f"Seen ({diff_m}m ago)"
 
-        sent = 0
-        rcvd = 0
-        hourly = [0] * 24
-        daily_dates = set()
-        emoji_counter = Counter()
-        creator_counter = Counter()
-        ghost_messages = []
-        reflex_deltas = []
-        prev_msg_meta = None
+        thread_states[t_id] = {
+            "id": f"friend_{idx}",
+            "t_id": t_id,
+            "name": name,
+            "handle": handle,
+            "avatar": avatar,
+            "seen_status": seen_status,
+            "unseen_count": unseen_count,
+            "sent": 0,
+            "rcvd": 0,
+            "hourly": [0] * 24,
+            "daily_dates": set(),
+            "emoji_counter": Counter(),
+            "creator_counter": Counter(),
+            "creator_avatars": {},
+            "audio_counter": Counter(),
+            "hashtag_counter": Counter(),
+            "ghost_messages": [],
+            "reflex_deltas": [],
+            "cursor": None,
+            "exhausted": False,
+            "total_msgs_scanned": 0,
+        }
 
-        cursor = None
-        for _page in range(max_pages_per_thread):
-            params = {"direction": "older", "limit": "50"}
-            if cursor:
-                params["cursor"] = str(cursor)
+    total_scanned_overall = 0
+
+    for b in range(1, batches + 1):
+        active_any = False
+        for t_id, state in thread_states.items():
+            if state["exhausted"]:
+                continue
+            active_any = True
+            params = {"direction": "older", "limit": str(batch_size)}
+            if state["cursor"]:
+                params["cursor"] = str(state["cursor"])
+
             try:
                 res = cl.private_request(f"direct_v2/threads/{t_id}/", params=params)
                 th = res.get("thread", {})
                 items = th.get("items", [])
                 if not items:
-                    break
+                    state["exhausted"] = True
+                    continue
+
+                state["total_msgs_scanned"] += len(items)
+                total_scanned_overall += len(items)
+                prev_msg_meta = None
+
                 for item in items:
                     is_me = str(item.get("user_id", "")) == my_pk
                     dt = parse_timestamp(item.get("timestamp", 0))
                     ts_sec = dt.timestamp()
+
                     if prev_msg_meta and prev_msg_meta[1] != is_me:
                         delta = abs(prev_msg_meta[0] - ts_sec)
                         if 1 <= delta <= 3600:
-                            reflex_deltas.append(delta)
+                            state["reflex_deltas"].append(delta)
                     prev_msg_meta = (ts_sec, is_me)
 
                     reactions = item.get("reactions", {}).get("emojis", [])
                     for r in reactions:
                         em = r.get("emoji")
                         if em:
-                            emoji_counter[em] += 1
+                            state["emoji_counter"][em] += 1
 
                     if is_reel(item):
                         if is_me:
-                            sent += 1
+                            state["sent"] += 1
                         else:
-                            rcvd += 1
-                        hourly[dt.hour] += 1
-                        daily_dates.add(dt.strftime("%Y-%m-%d"))
+                            state["rcvd"] += 1
+                        state["hourly"][dt.hour] += 1
+                        state["daily_dates"].add(dt.strftime("%Y-%m-%d"))
 
-                        creator_name = "viral.creator"
-                        reel_url = "https://instagram.com/reels/"
-                        for k in ["xma_clip", "xma_media_share"]:
-                            xl = item.get(k) or []
-                            if isinstance(xl, list) and xl:
-                                c = xl[0].get("header_title_text")
-                                if c and not str(c).startswith("http") and len(str(c)) < 32:
-                                    creator_name = str(c)
-                                    creator_counter[creator_name] += 1
-                                u = xl[0].get("target_url")
-                                if u:
-                                    reel_url = str(u)
-                                break
+                        meta = extract_reel_metadata(item)
+                        c = meta["creator"]
+                        if c and c != "viral.creator":
+                            state["creator_counter"][c] += 1
+                            if meta["creator_avatar"] and c not in state["creator_avatars"]:
+                                state["creator_avatars"][c] = meta["creator_avatar"]
 
-                        if len(ghost_messages) < 10:
-                            ghost_messages.append({
+                        if meta["audio_title"]:
+                            state["audio_counter"][(meta["audio_title"], meta["audio_artist"])] += 1
+
+                        if meta["caption"]:
+                            tags = re.findall(r"#([a-zA-Z0-9_]{2,30})", meta["caption"])
+                            for tag in tags:
+                                state["hashtag_counter"][f"#{tag.lower()}"] += 1
+
+                        if len(state["ghost_messages"]) < 10:
+                            state["ghost_messages"].append({
                                 "time": dt.strftime("%H:%M"),
-                                "sender": "You" if is_me else name[:16],
+                                "sender": "You" if is_me else state["name"][:16],
                                 "is_me": is_me,
                                 "is_reel": True,
-                                "text_or_url": reel_url,
-                                "creator": f"@{creator_name}",
+                                "text_or_url": meta["reel_url"],
+                                "creator": f"@{c}",
+                                "caption": meta["caption"][:60] if meta["caption"] else "",
                             })
-                cursor = th.get("oldest_cursor")
-                if not cursor:
-                    break
-                time.sleep(0.08)
-            except Exception:
-                break
 
-        total = sent + rcvd
-        if total > 0:
-            f_ratio = int(round((rcvd / total) * 100))
+                oldest = th.get("oldest_cursor")
+                if oldest and oldest != state["cursor"]:
+                    state["cursor"] = oldest
+                else:
+                    state["exhausted"] = True
+
+                time.sleep(0.06)
+            except Exception:
+                state["exhausted"] = True
+
+        # Build dossiers snapshot after this batch
+        dossiers = []
+        for state in thread_states.values():
+            total = state["sent"] + state["rcvd"]
+            if total == 0:
+                continue
+
+            f_ratio = int(round((state["rcvd"] / total) * 100))
             y_ratio = 100 - f_ratio
-            streak = compute_streak(daily_dates)
+            active_streak, best_streak, streak_label = compute_streaks(state["daily_dates"])
+
+            hourly = state["hourly"]
             night_reels = sum(hourly[0:5]) + hourly[23]
             night_score = min(99, max(15, int(round((night_reels / total) * 180))))
-            med_reflex = int(sorted(reflex_deltas)[len(reflex_deltas) // 2]) if reflex_deltas else 42
+
+            reflexes = state["reflex_deltas"]
+            med_reflex = int(sorted(reflexes)[len(reflexes) // 2]) if reflexes else 42
             reflex_str = f"⚡ {med_reflex}s Avg Reaction" if med_reflex < 60 else f"☕ {max(1, med_reflex // 60)}m Mindful Viewer"
 
-            top_emojis = [{"emoji": e, "count": c} for e, c in emoji_counter.most_common(3)] or [
+            top_emojis = [{"emoji": e, "count": c} for e, c in state["emoji_counter"].most_common(3)] or [
                 {"emoji": "💀", "count": max(5, total // 4)},
                 {"emoji": "😭", "count": max(3, total // 6)},
                 {"emoji": "🔥", "count": max(2, total // 8)},
             ]
-            top_creators = [
-                {"rank": i, "handle": f"@{c}", "count": cnt, "tag": "Shared Reel Creator"}
-                for i, (c, cnt) in enumerate(creator_counter.most_common(5), 1)
-            ]
+
+            top_creators = []
+            for i, (c, cnt) in enumerate(state["creator_counter"].most_common(5), 1):
+                top_creators.append({
+                    "rank": i,
+                    "handle": f"@{c}",
+                    "count": cnt,
+                    "avatar": state["creator_avatars"].get(c, ""),
+                    "tag": get_creator_niche(c),
+                    "pct": f"{int(round((cnt / max(1, total)) * 100))}%"
+                })
+
+            top_audio = []
+            for (title, artist), cnt in state["audio_counter"].most_common(3):
+                top_audio.append({
+                    "title": title,
+                    "artist": artist,
+                    "count": cnt,
+                })
+            if not top_audio and top_creators:
+                top_audio = [
+                    {"title": f"Original Audio • {c['handle']}", "artist": c['handle'], "count": c['count']}
+                    for c in top_creators[:2]
+                ]
+
+            top_tags = []
+            for tag, cnt in state["hashtag_counter"].most_common(4):
+                top_tags.append({"tag": tag, "count": cnt, "pct": f"{int(round((cnt / max(1, total)) * 100))}%"})
+            if not top_tags and top_creators:
+                top_tags = [
+                    {"tag": f"#{c['handle'].lstrip('@')}", "count": c['count'], "pct": f"{int(round((c['count'] / max(1, total)) * 100))}%"}
+                    for c in top_creators[:3]
+                ] + [{"tag": "#reels", "count": total, "pct": "100%"}]
+
+            primary_role = "UNHINGED 3 AM CURATORS" if night_score >= 75 else ("SYMMETRICAL ARCHIVIST" if 45 <= f_ratio <= 55 else ("CONTENT BROADCASTER 📢" if y_ratio >= 65 else "CONTENT CONSUMER 🍿"))
 
             dossiers.append({
-                "id": f"friend_{idx}",
-                "rank": idx,
-                "name": name,
-                "handle": handle,
-                "avatar": avatar,
+                "id": state["id"],
+                "rank": 0,
+                "name": state["name"],
+                "handle": state["handle"],
+                "avatar": state["avatar"],
                 "totalReels": total,
-                "streak": streak,
+                "streak": active_streak if active_streak > 0 else best_streak,
+                "activeStreak": active_streak,
+                "bestStreak": best_streak,
+                "streakLabel": streak_label,
                 "friendRatio": f_ratio,
                 "youRatio": y_ratio,
-                "friendCount": rcvd,
-                "youCount": sent,
-                "statusTag": "#1 MUTUAL" if idx == 1 else ("BALANCED" if 45 <= f_ratio <= 55 else "ACTIVE"),
-                "primaryRole": "UNHINGED 3 AM CURATORS" if night_score >= 75 else "SYMMETRICAL ARCHIVIST",
-                "statusSubtitle": f"{name.split()[0]} sends {rcvd / max(1, sent):.1f}x more reels" if rcvd >= sent else f"You send {sent / max(1, rcvd):.1f}x more reels",
+                "friendCount": state["rcvd"],
+                "youCount": state["sent"],
+                "statusTag": "BALANCED" if 45 <= f_ratio <= 55 else ("ACTIVE" if total > 20 else "MUTUAL"),
+                "primaryRole": primary_role,
+                "statusSubtitle": f"{state['name'].split()[0]} sends {state['rcvd'] / max(1, state['sent']):.1f}x more reels" if state["rcvd"] >= state["sent"] else f"You send {state['sent'] / max(1, state['rcvd']):.1f}x more reels",
                 "nightScore": night_score,
                 "nightTitle": "Certified 3 AM Doomscroll Duo" if night_score >= 75 else "Evening Reel Syndicate",
                 "nightDesc": f"{night_score}% night owl index across {total:,} reels.",
-                "topGenre": "Viral Reels & Memes",
+                "topGenre": top_creators[0]["tag"] if top_creators else "Viral Reels & Memes",
                 "responseReflex": reflex_str,
                 "hourlyHistogram": hourly,
-                "seenStatus": seen_status,
-                "unseenCount": unseen_count,
+                "seenStatus": state["seen_status"],
+                "unseenCount": state["unseen_count"],
                 "reactions": top_emojis,
-                "hashtags": [
-                    {"tag": "#reels", "count": max(4, total // 3), "pct": "92%"},
-                    {"tag": "#brainrot", "count": max(3, total // 5), "pct": "81%"},
-                    {"tag": "#viral", "count": max(2, total // 7), "pct": "68%"},
-                ],
-                "audioTracks": [
-                    {"title": "Original Reel Audio", "artist": "Instagram Reels", "count": max(3, total // 10)},
-                    {"title": "Viral Phonk Edit", "artist": "Trending Audio", "count": max(2, total // 15)},
-                ],
+                "hashtags": top_tags,
+                "audioTracks": top_audio,
                 "creators": top_creators,
-                "ghostMessages": ghost_messages,
+                "ghostMessages": state["ghost_messages"],
             })
 
-    dossiers.sort(key=lambda x: x["totalReels"], reverse=True)
-    for i, d in enumerate(dossiers, 1):
-        d["rank"] = i
+        dossiers.sort(key=lambda x: x["totalReels"], reverse=True)
+        for i, d in enumerate(dossiers, 1):
+            d["rank"] = i
+            if i == 1:
+                d["statusTag"] = "#1 MUTUAL"
 
-    if dossiers:
-        try:
-            VAULT_JSON_FILE.write_text(json.dumps(dossiers, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        if dossiers:
+            try:
+                VAULT_JSON_FILE.write_text(json.dumps(dossiers, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
 
-    return dossiers
+        total_reels_now = sum(d["totalReels"] for d in dossiers)
+        # Emit real-time progress update
+        progress_payload = {
+            "status": "progress",
+            "type": "progress",
+            "batch": b,
+            "totalBatches": batches,
+            "scannedMessages": total_scanned_overall,
+            "totalReels": total_reels_now,
+            "friends": dossiers,
+        }
+        print(json.dumps(progress_payload, ensure_ascii=False))
+        sys.stdout.flush()
+
+        if not active_any:
+            break
+
+    # Emit final complete event
+    active_user = getattr(cl, "username", "") or (USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else f"user_{cl.user_id}")
+    complete_payload = {
+        "status": "ok",
+        "type": "complete",
+        "username": active_user,
+        "scannedMessages": total_scanned_overall,
+        "totalReels": sum(d["totalReels"] for d in dossiers),
+        "friends": dossiers,
+    }
+    print(json.dumps(complete_payload, ensure_ascii=False))
+    sys.stdout.flush()
 
 
 def main():
     parser = argparse.ArgumentParser(description="Instagram Reel Counter Bridge")
-    parser.add_argument("--action", default="scan", choices=["scan", "saved_session_scan", "check_session", "login", "2fa"])
+    parser.add_argument("--action", default="scan", choices=["scan", "saved_session_scan", "check_session", "login", "2fa", "deep_stream"])
     parser.add_argument("--username", default="")
     parser.add_argument("--password", default="")
     parser.add_argument("--code", default="")
-    parser.add_argument("--limit", type=int, default=10)
-    parser.add_argument("--pages", type=int, default=4)
+    parser.add_argument("--limit", type=int, default=15)
+    parser.add_argument("--batches", type=int, default=6)
+    parser.add_argument("--batch-size", type=int, default=40)
     args = parser.parse_args()
 
     cl = get_client()
@@ -330,6 +575,19 @@ def main():
         print(json.dumps({"status": "ok", "exists": False}))
         return
 
+    if args.action == "deep_stream":
+        if SESSION_FILE.exists():
+            try:
+                cl.load_settings(SESSION_FILE)
+                stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size)
+                return
+            except Exception as e:
+                print(json.dumps({"type": "error", "message": str(e)}))
+                return
+        else:
+            print(json.dumps({"type": "error", "message": "No session available for deep stream."}))
+            return
+
     # Check if we should use existing saved session
     req_user = args.username.strip().lstrip("@").lower()
     can_use_saved_session = (
@@ -344,27 +602,17 @@ def main():
         try:
             cl.load_settings(SESSION_FILE)
             active_username = cached_user or f"user_{cl.user_id}"
-            dossiers = compile_dossiers(cl, max_threads=args.limit, max_pages_per_thread=args.pages)
-            print(json.dumps({
-                "status": "ok",
-                "authMethod": "saved_session_bridge",
-                "username": active_username,
-                "user_id": str(cl.user_id),
-                "friends": dossiers,
-                "totalScanned": len(dossiers),
-                "timestamp": datetime.datetime.now().isoformat()
-            }, ensure_ascii=False))
+            stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size)
             return
         except LoginRequired:
             SESSION_FILE.unlink(missing_ok=True)
             USER_FILE.unlink(missing_ok=True)
-            if args.action == "saved_session_scan":
-                print(json.dumps({
-                    "status": "fail",
-                    "code": "SESSION_EXPIRED",
-                    "message": "Saved session expired. Please enter your credentials."
-                }))
-                return
+            print(json.dumps({
+                "status": "fail",
+                "code": "SESSION_EXPIRED",
+                "message": "Saved session expired. Please enter your credentials."
+            }))
+            return
         except Exception as e:
             if VAULT_JSON_FILE.exists():
                 try:
@@ -395,14 +643,7 @@ def main():
             cl.two_factor_login(code)
             cl.dump_settings(SESSION_FILE)
             USER_FILE.write_text(target_user or str(cl.user_id), encoding="utf-8")
-            dossiers = compile_dossiers(cl, max_threads=args.limit, max_pages_per_thread=args.pages)
-            print(json.dumps({
-                "status": "ok",
-                "authMethod": "instagrapi_2fa",
-                "username": target_user or str(cl.user_id),
-                "friends": dossiers,
-                "totalScanned": len(dossiers)
-            }, ensure_ascii=False))
+            stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size)
             return
         except Exception as e:
             print(json.dumps({"status": "fail", "message": f"2FA verification failed: {e}"}))
@@ -419,14 +660,7 @@ def main():
         cl.login(target_user, target_pass)
         cl.dump_settings(SESSION_FILE)
         USER_FILE.write_text(target_user, encoding="utf-8")
-        dossiers = compile_dossiers(cl, max_threads=args.limit, max_pages_per_thread=args.pages)
-        print(json.dumps({
-            "status": "ok",
-            "authMethod": "instagrapi_fresh_login",
-            "username": target_user,
-            "friends": dossiers,
-            "totalScanned": len(dossiers)
-        }, ensure_ascii=False))
+        stream_progressive_scan(cl, max_threads=args.limit, batches=args.batches, batch_size=args.batch_size)
     except TwoFactorRequired:
         print(json.dumps({
             "status": "two_factor_required",

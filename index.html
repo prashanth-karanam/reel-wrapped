@@ -273,6 +273,24 @@
         </div>
       </div>
 
+      <!-- Live Background Deep Scan Banner & Continuous Progress -->
+      <div id="live-scan-progress-banner" class="hidden mb-3 p-3.5 rounded-2xl bg-gradient-to-r from-purple-950 via-slate-900 to-indigo-950 border border-purple-500/40 text-white shadow-md space-y-2.5">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
+            <span id="live-scan-title" class="text-xs font-black text-purple-200 tracking-wide truncate">⚡ Live DM Deep Scan in Progress</span>
+          </div>
+          <span id="live-scan-batch-badge" class="text-[10px] font-mono font-bold bg-white/15 border border-white/20 text-pink-200 px-2.5 py-0.5 rounded-full shrink-0">Batch 1/8</span>
+        </div>
+        <div class="w-full bg-black/50 rounded-full h-2 overflow-hidden p-0.5 border border-white/10">
+          <div id="live-scan-progress-bar" class="brand-gradient-bg h-full rounded-full transition-all duration-300" style="width: 15%"></div>
+        </div>
+        <div class="flex items-center justify-between text-[11px] font-mono text-purple-100/90 pt-0.5">
+          <span id="live-scan-msg-count">Pinging older messages across chats...</span>
+          <span id="live-scan-reel-count" class="font-bold text-amber-300">Counting...</span>
+        </div>
+      </div>
+
       <!-- Friend Leaderboard List -->
       <div id="leaderboard-list" class="space-y-3"></div>
     </div>
@@ -1278,9 +1296,12 @@
       }
     ];
 
+    window.DEFAULT_FRIENDS = DEFAULT_FRIENDS;
     let FRIENDS = [...DEFAULT_FRIENDS];
+    window.FRIENDS = FRIENDS;
     let currentFilter = 'all';
     let currentFriendId = FRIENDS[0].id;
+    window.currentFriendId = currentFriendId;
     let currentStoryTheme = 'sunset';
     let isBiometricActive = true;
     let activeAudioIdx = -1;
@@ -1425,16 +1446,19 @@
     }
 
     function updateGlobalBannerSummary() {
-      const totalReels = FRIENDS.reduce((acc, f) => acc + (f.totalReels || 0), 0);
-      const maxStreak = FRIENDS.reduce((acc, f) => Math.max(acc, f.streak || 0), 0);
+      const list = (window.FRIENDS && window.FRIENDS.length > 0) ? window.FRIENDS : (typeof FRIENDS !== 'undefined' ? FRIENDS : []);
+      const totalReels = list.reduce((acc, f) => acc + (f.totalReels || 0), 0);
+      const maxStreak = list.reduce((acc, f) => Math.max(acc, f.bestStreak || f.streak || 0), 0);
       const summaryEl = document.getElementById('banner-total-summary');
       const streakEl = document.getElementById('banner-peak-streak');
       const profEl = document.getElementById('profile-total-reels');
       const filterAllBtn = document.getElementById('filter-all');
-      if (summaryEl) summaryEl.innerText = `${totalReels.toLocaleString()} Reels Exchanged across ${FRIENDS.length} top friends`;
+      if (summaryEl && (totalReels > 0 || list.length > 0)) {
+        summaryEl.innerText = `${totalReels.toLocaleString()} Reels Exchanged across ${list.length} top friends`;
+      }
       if (streakEl) streakEl.innerText = `${maxStreak} Days`;
-      if (profEl) profEl.innerText = `${totalReels.toLocaleString()} Reels`;
-      if (filterAllBtn) filterAllBtn.innerText = `All (${FRIENDS.length})`;
+      if (profEl && totalReels > 0) profEl.innerText = `${totalReels.toLocaleString()} Reels`;
+      if (filterAllBtn) filterAllBtn.innerText = `All (${list.length})`;
     }
 
     function setFilter(filterType) {
@@ -1482,6 +1506,10 @@
 
       container.innerHTML = list.map(f => {
         const medal = f.rank === 1 ? '🥇' : f.rank === 2 ? '🥈' : f.rank === 3 ? '🥉' : `#${f.rank}`;
+        const streakDisplay = (f.activeStreak && f.activeStreak > 0)
+          ? `<span class="text-[10px] font-bold text-amber-600 block">🔥 ${f.activeStreak}d streak</span>`
+          : `<span class="text-[10px] font-bold text-slate-500 block">⚡ ${f.bestStreak || f.streak || 1}d peak</span>`;
+
         return `
           <div onclick="openFriendDossier('${f.id}')" class="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-sm hover:border-purple-300 hover:shadow-md transition-all cursor-pointer active:scale-[0.99]">
             <div class="flex items-center justify-between gap-2.5">
@@ -1495,13 +1523,13 @@
                     <h3 class="text-sm font-black text-slate-900 truncate">${f.name}</h3>
                     <span class="px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-50 text-purple-700 shrink-0">${f.statusTag}</span>
                   </div>
-                  <p class="text-[11px] text-slate-500 font-medium truncate">${f.handle} • ${f.topGenre}</p>
+                  <p class="text-[11px] text-slate-500 font-medium truncate">${f.handle} • ${f.topGenre || 'Trending Reels Creator'}</p>
                 </div>
               </div>
 
               <div class="text-right shrink-0">
                 <span class="text-sm font-black font-mono text-slate-900 block">${f.totalReels.toLocaleString()}</span>
-                <span class="text-[10px] font-bold text-amber-600 block">🔥 ${f.streak}d streak</span>
+                ${streakDisplay}
               </div>
             </div>
 
@@ -1593,7 +1621,7 @@
       const yRatio = 100 - fRatio;
 
       // Dossier updates
-      document.getElementById('dossier-streak-badge').innerText = `🔥 ${f.streak}-Day Streak`;
+      document.getElementById('dossier-streak-badge').innerText = f.streakLabel || `🔥 ${f.activeStreak || f.streak || 1}-Day Streak`;
       document.getElementById('dossier-archetype-title').innerText = f.primaryRole;
       document.getElementById('dossier-archetype-desc').innerText = `${f.statusSubtitle}. ${f.nightDesc}`;
       document.getElementById('dossier-total-reels').innerText = f.totalReels.toLocaleString();
@@ -1652,19 +1680,25 @@
         }).join('');
       }
 
-      // Top Creators
+      // Top 5 Shared Creators
       const creatorsEl = document.getElementById('dossier-creators-list');
       if (creatorsEl) {
         creatorsEl.innerHTML = (f.creators || []).map(c => `
-          <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-            <div class="flex items-center gap-2.5">
-              <span class="w-6 h-6 rounded-full bg-slate-200 text-slate-700 font-mono text-[10px] font-black flex items-center justify-center">#${c.rank}</span>
-              <div>
-                <div class="text-xs font-black text-slate-900">${c.handle}</div>
-                <div class="text-[10px] text-slate-500">${c.tag}</div>
+          <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100 hover:border-purple-200 transition-all">
+            <div class="flex items-center gap-2.5 min-w-0">
+              ${c.avatar ? `
+                <img src="${c.avatar}" alt="${c.handle}" class="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200">
+              ` : `
+                <span class="w-8 h-8 rounded-full bg-slate-200 text-slate-700 font-mono text-[10px] font-black flex items-center justify-center shrink-0">#${c.rank}</span>
+              `}
+              <div class="min-w-0">
+                <a href="https://instagram.com/${c.handle.replace('@','')}" target="_blank" rel="noopener noreferrer" class="text-xs font-black text-slate-900 hover:text-purple-600 truncate block">
+                  ${c.handle} ↗
+                </a>
+                <div class="text-[10px] text-slate-500 truncate">${c.tag}</div>
               </div>
             </div>
-            <span class="text-xs font-mono font-bold text-purple-600">${c.count} reels</span>
+            <span class="text-xs font-mono font-bold text-purple-600 shrink-0">${c.count} reels</span>
           </div>
         `).join('');
       }
@@ -2466,11 +2500,28 @@
     // Boot Sequence
     window.addEventListener('DOMContentLoaded', async () => {
       await initRustWasmEngine();
-      const cached = await loadFriendsFromIndexedDB();
-      if (cached && cached.length > 0) {
-        FRIENDS = cached;
-      } else {
-        await saveFriendsToIndexedDB(FRIENDS);
+
+      // Check if backend has authentic vault data from local session
+      try {
+        const liveRes = await fetch('/api/friends');
+        if (liveRes.ok) {
+          const liveData = await liveRes.json();
+          if (Array.isArray(liveData) && liveData.length > 0) {
+            FRIENDS = liveData;
+            window.FRIENDS = FRIENDS;
+          }
+        }
+      } catch (_) {}
+
+      if (!window.FRIENDS || !window.FRIENDS.length || window.FRIENDS === DEFAULT_FRIENDS) {
+        const cached = await loadFriendsFromIndexedDB();
+        if (cached && cached.length > 0) {
+          FRIENDS = cached;
+          window.FRIENDS = FRIENDS;
+        } else {
+          window.FRIENDS = FRIENDS;
+          await saveFriendsToIndexedDB(FRIENDS);
+        }
       }
 
       // Check URL hash for #friend=... deep link
@@ -2484,6 +2535,7 @@
         currentFriendId = FRIENDS[0].id;
       }
 
+      window.currentFriendId = currentFriendId;
       updateGlobalBannerSummary();
       filterFriendsList();
       selectFriend(currentFriendId);

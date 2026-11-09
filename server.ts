@@ -522,6 +522,140 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
 }
 
 
+interface ScanProgressState {
+  isScanning: boolean;
+  batch: number;
+  totalBatches: number;
+  scannedMessages: number;
+  totalReels: number;
+  status: string;
+  friends: any[];
+  error?: string;
+  lastUpdated: number;
+}
+
+let currentScanState: ScanProgressState = {
+  isScanning: false,
+  batch: 0,
+  totalBatches: 0,
+  scannedMessages: 0,
+  totalReels: 0,
+  status: 'idle',
+  friends: [],
+  lastUpdated: Date.now(),
+};
+
+// SSE subscribers
+const sseClients: express.Response[] = [];
+
+function broadcastScanState(event: string, data: any) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (let i = sseClients.length - 1; i >= 0; i--) {
+    try {
+      sseClients[i].write(payload);
+    } catch {
+      sseClients.splice(i, 1);
+    }
+  }
+}
+
+let activeScanChild: any = null;
+
+function triggerBackgroundDeepScan(limit = 15, batches = 8, batchSize = 40): boolean {
+  if (currentScanState.isScanning && activeScanChild) {
+    return false; // Already in progress
+  }
+
+  currentScanState = {
+    isScanning: true,
+    batch: 0,
+    totalBatches: batches,
+    scannedMessages: 0,
+    totalReels: 0,
+    status: 'starting',
+    friends: currentScanState.friends && currentScanState.friends.length ? currentScanState.friends : [],
+    lastUpdated: Date.now(),
+  };
+  broadcastScanState('status', currentScanState);
+
+  const scriptPath = path.join(__dirname, 'scan_bridge.py');
+  const child = spawn('python', [
+    scriptPath,
+    '--action', 'deep_stream',
+    '--limit', String(limit),
+    '--batches', String(batches),
+    '--batch-size', String(batchSize),
+  ], {
+    windowsHide: true,
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+  });
+
+  activeScanChild = child;
+  let buffer = '';
+
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk.toString('utf8');
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('{')) continue;
+      try {
+        const evt = JSON.parse(trimmed);
+        if (evt.type === 'progress' || evt.status === 'progress') {
+          currentScanState = {
+            isScanning: true,
+            batch: evt.batch,
+            totalBatches: evt.totalBatches,
+            scannedMessages: evt.scannedMessages,
+            totalReels: evt.totalReels,
+            status: `Pinging older DM history across chats (Batch ${evt.batch}/${evt.totalBatches})...`,
+            friends: evt.friends || [],
+            lastUpdated: Date.now(),
+          };
+          broadcastScanState('progress', currentScanState);
+        } else if (evt.type === 'complete' || evt.status === 'ok') {
+          currentScanState = {
+            isScanning: false,
+            batch: batches,
+            totalBatches: batches,
+            scannedMessages: evt.scannedMessages,
+            totalReels: evt.totalReels,
+            status: 'complete',
+            friends: evt.friends || [],
+            lastUpdated: Date.now(),
+          };
+          broadcastScanState('complete', currentScanState);
+        }
+      } catch {}
+    }
+  });
+
+  child.stderr.on('data', (chunk) => {
+    console.warn('[DeepScan Bridge Log]:', chunk.toString('utf8').trim());
+  });
+
+  child.on('close', (code) => {
+    activeScanChild = null;
+    currentScanState.isScanning = false;
+    if (currentScanState.status !== 'complete') {
+      currentScanState.status = code === 0 ? 'complete' : 'idle';
+    }
+    broadcastScanState('done', currentScanState);
+  });
+
+  child.on('error', (err) => {
+    activeScanChild = null;
+    currentScanState.isScanning = false;
+    currentScanState.status = 'error';
+    currentScanState.error = err.message;
+    broadcastScanState('error', currentScanState);
+  });
+
+  return true;
+}
+
 async function runPythonScanBridge(args: string[]): Promise<any> {
   return new Promise((resolve) => {
     const scriptPath = path.join(__dirname, 'scan_bridge.py');
@@ -535,8 +669,17 @@ async function runPythonScanBridge(args: string[]): Promise<any> {
     child.stderr.on('data', (d) => { stderr += d.toString('utf8'); });
     child.on('close', (code) => {
       try {
-        const json = JSON.parse(stdout.trim());
-        resolve(json);
+        const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            const parsed = JSON.parse(lines[i]);
+            return resolve(parsed);
+          } catch {}
+        }
+        resolve({
+          status: 'fail',
+          message: stderr || stdout || `scan_bridge process exited with code ${code}`,
+        });
       } catch {
         resolve({
           status: 'fail',
@@ -556,6 +699,37 @@ async function loginViaPythonInstagrapi(username: string, password: string, veri
   if (verificationCode) args.push('--code', verificationCode);
   return runPythonScanBridge(args);
 }
+
+app.get('/api/ig/live-scan-stream', (_req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  sseClients.push(res);
+  res.write(`event: status\ndata: ${JSON.stringify(currentScanState)}\n\n`);
+
+  _req.on('close', () => {
+    const idx = sseClients.indexOf(res);
+    if (idx >= 0) sseClients.splice(idx, 1);
+  });
+});
+
+app.get('/api/ig/live-scan-status', (_req, res) => {
+  res.json(currentScanState);
+});
+
+app.post('/api/ig/start-deep-scan', (req, res) => {
+  const limit = Math.min(30, Math.max(5, Number(req.body?.limit) || 15));
+  const batches = Math.min(20, Math.max(2, Number(req.body?.batches) || 8));
+  const batchSize = Math.min(100, Math.max(10, Number(req.body?.batchSize) || 40));
+
+  const started = triggerBackgroundDeepScan(limit, batches, batchSize);
+  res.json({
+    status: started ? 'started' : 'already_running',
+    scanState: currentScanState,
+  });
+});
 
 app.get('/api/ig/saved-session', async (_req, res) => {
   try {
@@ -595,8 +769,10 @@ app.get('/api/ig/saved-session', async (_req, res) => {
 app.post('/api/ig/saved-session-scan', async (_req, res) => {
   try {
     console.log('[ReelWrapped] Running saved session scan via Python bridge...');
-    const scanResult = await runPythonScanBridge(['--action', 'saved_session_scan', '--limit', '10', '--pages', '4']);
-    if (scanResult && scanResult.status === 'ok') {
+    const scanResult = await runPythonScanBridge(['--action', 'saved_session_scan', '--limit', '15', '--batches', '4', '--batch-size', '40']);
+    if (scanResult && (scanResult.status === 'ok' || scanResult.type === 'complete')) {
+      // Auto-trigger continuous deep-scan in background
+      setTimeout(() => triggerBackgroundDeepScan(15, 8, 40), 1000);
       return res.json(scanResult);
     }
     return res.status(400).json(scanResult || { status: 'fail', message: 'Could not load saved session.' });
@@ -1011,6 +1187,9 @@ app.get('/api/ig/media-proxy', (req, res) => {
 });
 
 app.get('/api/friends', (_req, res) => {
+  if (currentScanState.friends && currentScanState.friends.length > 0) {
+    return res.json(currentScanState.friends);
+  }
   try {
     const vaultPath = path.join(os.homedir(), '.ig_toolkit', 'reel_wrapped_local_vault.json');
     if (fs.existsSync(vaultPath)) {
