@@ -8,49 +8,33 @@ import crypto from 'crypto';
 import tweetsodium from 'tweetsodium';
 import puppeteer from 'puppeteer-core';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure index.html includes spectator-auth.js with relative path for GitHub Pages + Localhost and zero personal details
-try {
-  const indexHtmlPath = path.join(__dirname, 'index.html');
-  if (fs.existsSync(indexHtmlPath)) {
-    let html = fs.readFileSync(indexHtmlPath, 'utf8');
-    let modified = false;
-    if (html.includes('<script src="/spectator-auth.js"></script>')) {
-      html = html.replace('<script src="/spectator-auth.js"></script>', '<script src="spectator-auth.js?v=2.5.0"></script>');
-      modified = true;
-    } else if (!html.includes('spectator-auth.js')) {
-      html = html.replace('</body>', '  <script src="spectator-auth.js?v=2.5.0"></script>\n</body>');
-      modified = true;
-    }
-    if (html.includes('value="@prashanth.k"')) {
-      html = html.replace('value="@prashanth.k"', 'value="" placeholder="@yourusername"');
-      modified = true;
-    }
-    const oldExternalLink = `<a href="\${m.text_or_url}" target="_blank" rel="noopener noreferrer" class="px-2 py-1 rounded-lg bg-slate-900 text-white text-[10px] font-bold shrink-0">Open ↗</a>`;
-    const newInAppBtn = `<button type="button" onclick="openInAppReelSpectator('\${selectedFriend.id}', \${i})" class="px-2.5 py-1.5 rounded-lg brand-gradient-bg text-white text-[10px] font-black shrink-0 shadow-sm">👁️ Spectate In-App</button>`;
-    if (html.includes(oldExternalLink)) {
-      html = html.replace(oldExternalLink, newInAppBtn);
-      modified = true;
-    }
-    if (modified) {
-      fs.writeFileSync(indexHtmlPath, html, 'utf8');
-    }
-  }
-} catch (e) {
-  console.warn('index.html patch check skipped:', e);
-}
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Resolve Python executable across Linux/macOS (python3) and Windows (python)
+let cachedPythonCmd: string | null = null;
+function getPythonCommand(): string {
+  if (cachedPythonCmd) return cachedPythonCmd;
+  for (const candidate of ['python3', 'python']) {
+    try {
+      execSync(`${candidate} --version`, { stdio: 'ignore' });
+      cachedPythonCmd = candidate;
+      return candidate;
+    } catch {}
+  }
+  cachedPythonCmd = 'python3';
+  return cachedPythonCmd;
+}
 
 const IG_ANDROID_UA =
   'Instagram 361.0.0.46.88 Android (34/14; 480dpi; 1080x2400; samsung; SM-S928B; e3q; s5e9945; en_US; 665902731)';
@@ -65,7 +49,7 @@ interface IgDeviceIds {
   adid: string;
 }
 
-function generateDeviceIds(seedUsername = 'user'): IgDeviceIds {
+export function generateDeviceIds(seedUsername = 'user'): IgDeviceIds {
   const hash = crypto.createHash('md5').update(seedUsername).digest('hex');
   return {
     phone_id: crypto.randomUUID(),
@@ -195,17 +179,89 @@ function formatCookieHeader(cookies: Record<string, string>): string {
     .join('; ');
 }
 
+function computeStreakStats(daySet: Set<number>) {
+  const sortedDays = Array.from(daySet).sort((a, b) => a - b);
+  let bestStreak = sortedDays.length > 0 ? 1 : 0;
+  let curStreak = sortedDays.length > 0 ? 1 : 0;
+  for (let i = 1; i < sortedDays.length; i++) {
+    if (sortedDays[i] - sortedDays[i - 1] === 1) {
+      curStreak++;
+      if (curStreak > bestStreak) bestStreak = curStreak;
+    } else if (sortedDays[i] !== sortedDays[i - 1]) {
+      curStreak = 1;
+    }
+  }
+  let activeStreak = 0;
+  if (sortedDays.length > 0) {
+    const todayEpoch = Math.floor(Date.now() / 86400000);
+    const lastDay = sortedDays[sortedDays.length - 1];
+    if (todayEpoch - lastDay <= 2) {
+      activeStreak = 1;
+      for (let i = sortedDays.length - 1; i > 0; i--) {
+        if (sortedDays[i] - sortedDays[i - 1] === 1) {
+          activeStreak++;
+        } else if (sortedDays[i] !== sortedDays[i - 1]) {
+          break;
+        }
+      }
+    }
+  }
+  const displayStreak = activeStreak > 0 ? activeStreak : bestStreak;
+  const streakLabel =
+    activeStreak > 0
+      ? `🔥 ${activeStreak}d Active Streak`
+      : bestStreak > 0
+      ? `⚡ ${bestStreak}d Peak Streak`
+      : 'No streak yet';
+  return { activeStreak, bestStreak, displayStreak, streakLabel };
+}
+
+function computeResponseReflexLabel(allItems: any[], viewerPk: string): string {
+  const sorted = [...allItems]
+    .map((item) => {
+      const tsMicro = Number(item.timestamp || 0);
+      const tsSec = tsMicro > 1e14 ? tsMicro / 1e6 : tsMicro > 1e11 ? tsMicro / 1e3 : tsMicro;
+      return {
+        isMe: String(item.user_id || '') === viewerPk,
+        tsSec,
+      };
+    })
+    .filter((x) => x.tsSec > 0)
+    .sort((a, b) => a.tsSec - b.tsSec);
+
+  const deltas: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].isMe !== sorted[i - 1].isMe) {
+      const dt = sorted[i].tsSec - sorted[i - 1].tsSec;
+      if (dt > 2 && dt < 43200) {
+        deltas.push(dt);
+      }
+    }
+  }
+  if (deltas.length === 0) return '⚡ Instant Reflex';
+  deltas.sort((a, b) => a - b);
+  const med = deltas[Math.floor(deltas.length / 2)];
+  if (med < 60) return `⚡ ${Math.max(5, Math.round(med))}s Avg Reaction`;
+  if (med < 3600) return `⚡ ${Math.round(med / 60)}m Avg Reflex`;
+  return `☕ ${(med / 3600).toFixed(1)}h Reflex`;
+}
+
 // ============================================================================
 // REAL GHOST MODE INBOX & DEEP THREAD PAGINATION (ZERO FAKE DATA)
 // Matches prashanth-karanam/instagram-reel-counter app.py direct_v2 logic
 // ============================================================================
-async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsername: string) {
+async function scanLiveInstagramInbox(
+  cookies: Record<string, string>,
+  myUsername: string,
+  maxPagesPerThread = 3,
+  onProgress?: (batch: number, totalBatches: number, scannedMessages: number, totalReels: number, friends: any[]) => void
+) {
   const cookieStr = formatCookieHeader(cookies);
   const csrf = cookies['csrftoken'] || '';
 
   let useWebEndpoint = true;
   let inboxRes = await igWebRequest(
-    'https://www.instagram.com/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=15&thread_message_limit=20',
+    'https://www.instagram.com/api/v1/direct_v2/inbox/?persistentBadging=true&folder=&limit=20&thread_message_limit=20',
     'GET',
     {
       Cookie: cookieStr,
@@ -224,7 +280,7 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
   if (inboxRes.status >= 400 || !inboxJson.inbox) {
     useWebEndpoint = false;
     inboxRes = await igAndroidRequest(
-      'https://i.instagram.com/api/v1/direct_v2/inbox/?visual_message_return_type=unseen&thread_message_limit=20&persistentBadging=true&limit=15',
+      'https://i.instagram.com/api/v1/direct_v2/inbox/?visual_message_return_type=unseen&thread_message_limit=20&persistentBadging=true&limit=20',
       'GET',
       {
         Cookie: cookieStr,
@@ -249,9 +305,13 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
   const realViewerUsername = inboxJson.viewer?.username || myUsername;
   const threads: any[] = inboxJson.inbox?.threads || [];
   const friends: any[] = [];
+  let cumulativeScannedMessages = 0;
+  let cumulativeTotalReels = 0;
 
-  // Scan up to top 10 active DM threads and paginate each thread in Ghost Mode (GET only, zero Seen mutations)
-  for (let idx = 0; idx < Math.min(threads.length, 10); idx++) {
+  const threadLimit = Math.min(threads.length, 15);
+
+  // Scan top active DM threads and paginate each thread in Ghost Mode (GET only, zero Seen mutations)
+  for (let idx = 0; idx < threadLimit; idx++) {
     const t = threads[idx];
     const threadId = t.thread_id;
     const users = t.users || [];
@@ -262,13 +322,12 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
       ? `/api/ig/media-proxy?url=${encodeURIComponent(primaryUser.profile_pic_url)}`
       : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80';
 
-    // Collect items from initial inbox + paginate up to 4 pages (~100-150 messages per thread) for fast live response
     const allItems: any[] = [...(t.items || [])];
     let cursor = t.oldest_cursor;
     let hasOlder = Boolean(t.has_older && cursor);
     let pagesFetched = 0;
 
-    while (hasOlder && cursor && pagesFetched < 3) {
+    while (hasOlder && cursor && pagesFetched < maxPagesPerThread) {
       pagesFetched++;
       try {
         const threadUrl = useWebEndpoint
@@ -300,11 +359,13 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
 
     let friendCount = 0;
     let youCount = 0;
-    const hourly = new Array(12).fill(0);
+    // 24-hour activity histogram (0..23)
+    const hourly = new Array(24).fill(0);
     const daySet = new Set<number>();
-    const creatorMap: Record<string, number> = {};
+    const creatorMap: Record<string, { count: number; avatar: string }> = {};
     const hashtagMap: Record<string, number> = {};
     const reactionMap: Record<string, number> = {};
+    const audioMap: Record<string, { title: string; artist: string; count: number }> = {};
     const ghostMessages: any[] = [];
 
     for (const item of allItems) {
@@ -315,7 +376,7 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
       const dt = new Date(tsMs);
       const timeStr = dt.toTimeString().slice(0, 5);
 
-      // Count reactions if present
+      // Count authentic reactions
       const likes = item.reactions?.likes || [];
       const emojis = item.reactions?.emojis || [];
       for (const e of emojis) {
@@ -326,7 +387,6 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
         reactionMap['❤️'] = (reactionMap['❤️'] || 0) + likes.length;
       }
 
-      // Check for shared Reel / Clip / Media Share / XMA Reel exactly like instagram-reel-counter/app.py
       const clipMedia =
         item.clip?.clip ||
         item.media_share ||
@@ -344,15 +404,47 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
       if (isReel) {
         if (isMe) youCount++;
         else friendCount++;
-        hourly[Math.floor(dt.getHours() / 2)]++;
+        hourly[dt.getHours()]++;
         daySet.add(Math.floor(tsMs / 86400000));
 
-        const ownerHandle =
-          clipMedia?.user?.username ||
-          clipMedia?.owner?.username ||
-          item.clip?.clip?.user?.username ||
-          'instagram.creator';
-        creatorMap[ownerHandle] = (creatorMap[ownerHandle] || 0) + 1;
+        const userObj = clipMedia?.user || clipMedia?.owner || item.clip?.clip?.user || {};
+        const ownerHandle = userObj.username || '';
+        const ownerPic = userObj.profile_pic_url
+          ? `/api/ig/media-proxy?url=${encodeURIComponent(userObj.profile_pic_url)}`
+          : '';
+        if (ownerHandle) {
+          if (!creatorMap[ownerHandle]) {
+            creatorMap[ownerHandle] = { count: 0, avatar: ownerPic };
+          }
+          creatorMap[ownerHandle].count++;
+          if (ownerPic && !creatorMap[ownerHandle].avatar) {
+            creatorMap[ownerHandle].avatar = ownerPic;
+          }
+        }
+
+        // Extract audio metadata if present
+        const clipsMeta = clipMedia?.clips_metadata || item.clip?.clip?.clips_metadata || {};
+        const musicInfo = clipsMeta.music_info?.music_asset_info || null;
+        const origSound = clipsMeta.original_sound_info || null;
+        let trackTitle = '';
+        let trackArtist = '';
+        if (musicInfo && musicInfo.title) {
+          trackTitle = String(musicInfo.title).trim();
+          trackArtist = String(musicInfo.display_artist || ownerHandle || 'Instagram Audio').trim();
+        } else if (origSound && origSound.original_audio_title) {
+          const rawTitle = String(origSound.original_audio_title).trim();
+          const igArtist = origSound.ig_artist?.username || ownerHandle || 'creator';
+          trackTitle =
+            rawTitle.toLowerCase() === 'original audio' ? `Original Audio • @${igArtist}` : rawTitle;
+          trackArtist = `@${igArtist}`;
+        }
+        if (trackTitle) {
+          const key = `${trackTitle}___${trackArtist}`;
+          if (!audioMap[key]) {
+            audioMap[key] = { title: trackTitle, artist: trackArtist, count: 0 };
+          }
+          audioMap[key].count++;
+        }
 
         const captionText =
           clipMedia?.caption?.text ||
@@ -371,23 +463,29 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
           item.media_share?.video_versions?.[0]?.url ||
           item.visual_media?.media?.video_versions?.[0]?.url ||
           '';
+        const proxiedVideoUrl = rawVideoUrl
+          ? `/api/ig/media-proxy?url=${encodeURIComponent(rawVideoUrl)}`
+          : '';
 
         const code = clipMedia?.code || item.clip?.clip?.code || '';
-        const reelLabel = code ? `https://instagram.com/reel/${code}/` : `Reel by @${ownerHandle}`;
+        const reelUrl = code ? `https://www.instagram.com/reel/${code}/` : '';
+        const reelLabel = reelUrl || (ownerHandle ? `Reel by @${ownerHandle}` : 'Shared Reel');
 
-        if (ghostMessages.length < 25) {
+        if (ghostMessages.length < 30) {
           ghostMessages.push({
             time: timeStr,
             sender: isMe ? 'You' : friendName,
             is_me: isMe,
             is_reel: true,
+            shortcode: code,
+            reel_url: reelUrl,
             text_or_url: captionText ? `${reelLabel} • ${captionText}` : reelLabel,
-            creator: `@${ownerHandle}`,
-            video_url: rawVideoUrl,
-            caption: captionText || `Shared Reel by @${ownerHandle} (${timeStr})`,
+            creator: ownerHandle ? `@${ownerHandle}` : '@reels',
+            video_url: proxiedVideoUrl,
+            caption: captionText || `Shared Reel ${ownerHandle ? 'by @' + ownerHandle : ''} (${timeStr})`,
           });
         }
-      } else if (itemType === 'text' && item.text && ghostMessages.length < 25) {
+      } else if (itemType === 'text' && item.text && ghostMessages.length < 30) {
         ghostMessages.push({
           time: timeStr,
           sender: isMe ? 'You' : friendName,
@@ -400,11 +498,17 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
     }
 
     const totalReels = friendCount + youCount;
+    cumulativeScannedMessages += allItems.length;
+    cumulativeTotalReels += totalReels;
+
     const denom = Math.max(1, totalReels);
     const friendRatio = totalReels > 0 ? Math.round((friendCount * 100) / denom) : 50;
-    const youRatio = 100 - friendRatio;
-    const nightReels = hourly[0] + hourly[1] + hourly[11];
-    const nightScore = totalReels > 0 ? Math.min(99, Math.max(15, Math.round((nightReels * 180) / denom))) : 25;
+    const youRatio = totalReels > 0 ? 100 - friendRatio : 50;
+    const nightReels = hourly[0] + hourly[1] + hourly[2] + hourly[3] + hourly[4] + hourly[23];
+    const nightScore = totalReels > 0 ? Math.min(99, Math.round((nightReels * 100) / denom)) : 0;
+
+    const { activeStreak, bestStreak, displayStreak, streakLabel } = computeStreakStats(daySet);
+    const responseReflex = computeResponseReflexLabel(allItems, viewerPk);
 
     // Exact Seen / Unseen calculation from instagram-reel-counter/app.py
     const lastSeenObj = t.last_seen_at || {};
@@ -425,29 +529,32 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
 
     const topReactions = Object.entries(reactionMap)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
+      .slice(0, 4)
       .map(([emoji, count]) => ({ emoji, count }));
-    if (topReactions.length === 0) {
-      topReactions.push({ emoji: '❤️', count: Math.max(1, Math.floor(totalReels / 2)) });
-      topReactions.push({ emoji: '😂', count: Math.max(1, Math.floor(totalReels / 3)) });
-      topReactions.push({ emoji: '🔥', count: Math.max(1, Math.floor(totalReels / 4)) });
-    }
 
     const topHashtags = Object.entries(hashtagMap)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
-      .map(([tag, count]) => ({ tag, count, pct: '90%' }));
-    if (topHashtags.length === 0) {
-      topHashtags.push({ tag: '#reels', count: totalReels, pct: '100%' });
-    }
+      .map(([tag, count]) => ({
+        tag,
+        count,
+        pct: `${Math.min(99, Math.max(10, Math.round((count * 100) / denom)))}%`,
+      }));
 
     const topCreators = Object.entries(creatorMap)
-      .sort((a, b) => b[1] - a[1])
+      .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 5)
-      .map(([h, count], i) => ({ rank: i + 1, handle: `@${h}`, count, tag: 'Shared in Your DMs' }));
-    if (topCreators.length === 0) {
-      topCreators.push({ rank: 1, handle: friendHandle, count: totalReels, tag: 'Direct Thread' });
-    }
+      .map(([h, info], i) => ({
+        rank: i + 1,
+        handle: `@${h}`,
+        count: info.count,
+        avatar: info.avatar,
+        tag: `Shared ${info.count}x in DMs`,
+      }));
+
+    const topAudioTracks = Object.values(audioMap)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 4);
 
     friends.push({
       id: `real_${threadId || idx}`,
@@ -458,7 +565,10 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
       avatar: avatarUrl,
       totalReels,
       messagesScanned: allItems.length,
-      streak: Math.max(1, daySet.size),
+      streak: displayStreak,
+      activeStreak,
+      bestStreak,
+      streakLabel,
       friendRatio,
       youRatio,
       friendCount,
@@ -470,27 +580,31 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
           : youRatio > 60
           ? 'YOU CARRY THE REELS'
           : 'BALANCED REEL SYNDICATE',
-      statusSubtitle: `${friendName.split(' ')[0]} sent ${friendCount} • You sent ${youCount} (in last ${allItems.length} msgs)`,
+      statusSubtitle: `${friendName.split(' ')[0]} sent ${friendCount} • You sent ${youCount} (in ${allItems.length} msgs)`,
       nightScore,
-      nightTitle: 'Real Direct_v2 Thread Telemetry',
-      nightDesc: `Scanned ${allItems.length} real DM messages in thread ${threadId} via Ghost Mode (Read receipts suppressed).`,
-      topGenre: `${allItems.length} Msgs Scanned • ${totalReels} Reels`,
-      responseReflex: seenStatus,
+      nightTitle: nightScore >= 35 ? '3 AM Night Owl Duo' : 'Daytime Reel Curators',
+      nightDesc: `${nightScore}% of shared reels were sent between 11 PM and 4 AM (${allItems.length} messages scanned).`,
+      topGenre: topCreators[0]
+        ? `Top Creator: ${topCreators[0].handle}`
+        : `${allItems.length} Msgs Scanned • ${totalReels} Reels`,
+      responseReflex,
       seenStatus,
       unseenCount,
       hourlyHistogram: hourly,
       reactions: topReactions,
       hashtags: topHashtags,
-      audioTracks: [
-        {
-          title: `Shared Reels in ${friendName}`,
-          artist: `${friendCount} from them • ${youCount} from you`,
-          count: totalReels,
-        },
-      ],
+      audioTracks: topAudioTracks,
       creators: topCreators,
       ghostMessages,
     });
+
+    if (onProgress) {
+      const sortedSnapshot = [...friends].sort(
+        (a, b) => b.totalReels - a.totalReels || (b.messagesScanned || 0) - (a.messagesScanned || 0)
+      );
+      sortedSnapshot.forEach((f, i) => (f.rank = i + 1));
+      onProgress(idx + 1, threadLimit, cumulativeScannedMessages, cumulativeTotalReels, sortedSnapshot);
+    }
   }
 
   // Sort by totalReels descending (or messagesScanned if tied)
@@ -498,29 +612,73 @@ async function scanLiveInstagramInbox(cookies: Record<string, string>, myUsernam
   friends.forEach((f, i) => (f.rank = i + 1));
 
   try {
+    const safeU = realViewerUsername.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'default';
     const vaultDir = path.join(os.homedir(), '.ig_toolkit');
-    fs.mkdirSync(vaultDir, { recursive: true });
+    const vaultsSubDir = path.join(vaultDir, 'vaults');
+    const sessionsSubDir = path.join(vaultDir, 'sessions');
+    fs.mkdirSync(vaultsSubDir, { recursive: true });
+    fs.mkdirSync(sessionsSubDir, { recursive: true });
+
     fs.writeFileSync(path.join(vaultDir, 'reel_wrapped_local_vault.json'), JSON.stringify(friends, null, 2));
+    fs.writeFileSync(path.join(vaultsSubDir, `${safeU}.json`), JSON.stringify(friends, null, 2));
 
     if (cookies.sessionid) {
-      const sessionPayload = JSON.stringify({
-        username: realViewerUsername,
-        authorization_data: { sessionid: cookies.sessionid, ds_user_id: viewerPk },
-        cookies,
-        saved_at: new Date().toISOString()
-      }, null, 2);
+      const sessionPayload = JSON.stringify(
+        {
+          username: realViewerUsername,
+          authorization_data: { sessionid: cookies.sessionid, ds_user_id: viewerPk },
+          cookies,
+          saved_at: new Date().toISOString(),
+        },
+        null,
+        2
+      );
       fs.writeFileSync(path.join(vaultDir, 'session.json'), sessionPayload);
+      fs.writeFileSync(path.join(sessionsSubDir, `${safeU}.json`), sessionPayload);
       fs.writeFileSync(path.join(vaultDir, 'user.txt'), realViewerUsername);
-      fs.writeFileSync(path.join(__dirname, 'session.json'), sessionPayload);
     }
   } catch {}
 
   return {
     user: { username: realViewerUsername, pk: viewerPk },
+    username: realViewerUsername,
+    scannedMessages: cumulativeScannedMessages,
+    totalReels: cumulativeTotalReels,
     friends,
   };
 }
 
+function loadSavedCookiesForUser(username = ''): { cookies: Record<string, string>; username: string } | null {
+  const toolkitDir = path.join(os.homedir(), '.ig_toolkit');
+  const safeReq = username.toLowerCase().replace(/[^a-z0-9_.]/g, '');
+  const candidatePaths = [
+    safeReq ? path.join(toolkitDir, 'sessions', `${safeReq}.json`) : null,
+    path.join(toolkitDir, 'session.json'),
+    path.join(os.homedir(), '.ig_reel_counter', 'session.json'),
+  ].filter(Boolean) as string[];
+
+  for (const cp of candidatePaths) {
+    if (fs.existsSync(cp)) {
+      try {
+        const sess = JSON.parse(fs.readFileSync(cp, 'utf8'));
+        const sid = sess.authorization_data?.sessionid || sess.cookies?.sessionid;
+        const uid = sess.authorization_data?.ds_user_id || sess.cookies?.ds_user_id;
+        const userTxt = path.join(toolkitDir, 'user.txt');
+        const detectedUser =
+          sess.username || (fs.existsSync(userTxt) ? fs.readFileSync(userTxt, 'utf8').trim() : username || 'user');
+        if (sid) {
+          const cookies: Record<string, string> = {
+            ...(sess.cookies || {}),
+            sessionid: decodeURIComponent(String(sid)),
+          };
+          if (uid) cookies.ds_user_id = String(uid);
+          return { cookies, username: detectedUser };
+        }
+      } catch {}
+    }
+  }
+  return null;
+}
 
 interface ScanProgressState {
   isScanning: boolean;
@@ -562,55 +720,8 @@ function broadcastScanState(event: string, data: any) {
 }
 
 let activeScanChild: any = null;
-let bgSyncTimer: NodeJS.Timeout | null = null;
-let lastBgSyncTime = 0;
-let nextBgSyncTargetTime = 0;
-
-function scheduleNextBackgroundSync(delayMs = 35000) {
-  if (bgSyncTimer) clearTimeout(bgSyncTimer);
-  nextBgSyncTargetTime = Date.now() + delayMs;
-
-  bgSyncTimer = setTimeout(async () => {
-    try {
-      const userTxtPath = path.join(os.homedir(), '.ig_toolkit', 'user.txt');
-      const diskUser = fs.existsSync(userTxtPath) ? fs.readFileSync(userTxtPath, 'utf8').trim() : '';
-      const activeUser = currentScanState.activeUser || diskUser;
-
-      if (!activeUser || activeUser === 'demo_syndicate' || activeUser === 'creator_guest') {
-        scheduleNextBackgroundSync(35000);
-        return;
-      }
-
-      const safeU = activeUser.toLowerCase().replace(/[^a-z0-9_.]/g, '');
-      const sessFile = path.join(os.homedir(), '.ig_toolkit', 'sessions', `${safeU}.json`);
-      const mainSess = path.join(os.homedir(), '.ig_toolkit', 'session.json');
-      const hasSession = fs.existsSync(sessFile) || fs.existsSync(mainSess);
-
-      if (!hasSession) {
-        scheduleNextBackgroundSync(45000);
-        return;
-      }
-
-      if (currentScanState.isScanning && activeScanChild) {
-        scheduleNextBackgroundSync(20000);
-        return;
-      }
-
-      lastBgSyncTime = Date.now();
-      console.log(`[ReelWrapped BG Refresher] Auto-refreshing inbox for new conversations & incoming reels for @${activeUser}...`);
-      triggerBackgroundDeepScan(50, 20, 75, 4, activeUser);
-    } catch (e) {
-      console.warn('[ReelWrapped BG Refresher Error]:', e);
-      scheduleNextBackgroundSync(45000);
-    }
-  }, delayMs);
-}
 
 function stopActiveScan() {
-  if (bgSyncTimer) {
-    clearTimeout(bgSyncTimer);
-    bgSyncTimer = null;
-  }
   if (activeScanChild) {
     try {
       activeScanChild.kill();
@@ -620,13 +731,69 @@ function stopActiveScan() {
   currentScanState.isScanning = false;
 }
 
-function triggerBackgroundDeepScan(limit = 50, batches = 50, batchSize = 75, workers = 4, targetUser = ''): boolean {
+async function runNodeBackgroundDeepScan(effectiveUser: string, maxPages = 6) {
+  const saved = loadSavedCookiesForUser(effectiveUser);
+  if (!saved) {
+    currentScanState.isScanning = false;
+    currentScanState.status = 'idle';
+    broadcastScanState('done', currentScanState);
+    return;
+  }
+  try {
+    const result = await scanLiveInstagramInbox(
+      saved.cookies,
+      saved.username,
+      maxPages,
+      (batch, totalBatches, scannedMessages, totalReels, friends) => {
+        currentScanState = {
+          isScanning: true,
+          batch,
+          totalBatches,
+          scannedMessages,
+          totalReels,
+          status: `⚡ Node Direct_v2 Wave ${batch}/${totalBatches}...`,
+          friends,
+          activeUser: saved.username,
+          lastUpdated: Date.now(),
+        };
+        broadcastScanState('progress', currentScanState);
+      }
+    );
+    currentScanState = {
+      isScanning: false,
+      batch: currentScanState.totalBatches || 15,
+      totalBatches: currentScanState.totalBatches || 15,
+      scannedMessages: result.scannedMessages,
+      totalReels: result.totalReels,
+      status: 'complete',
+      friends: result.friends,
+      activeUser: result.username,
+      lastUpdated: Date.now(),
+    };
+    broadcastScanState('complete', currentScanState);
+  } catch (err: any) {
+    currentScanState.isScanning = false;
+    currentScanState.status = 'error';
+    currentScanState.error = err.message;
+    broadcastScanState('error', currentScanState);
+  }
+}
+
+function triggerBackgroundDeepScan(limit = 20, batches = 50, batchSize = 75, workers = 4, targetUser = ''): boolean {
   const userTxtPath = path.join(os.homedir(), '.ig_toolkit', 'user.txt');
   const diskUser = fs.existsSync(userTxtPath) ? fs.readFileSync(userTxtPath, 'utf8').trim() : '';
   const effectiveUser = targetUser || diskUser || currentScanState.activeUser || '';
 
+  if (!effectiveUser || effectiveUser === 'demo_syndicate') {
+    return false;
+  }
+
   if (currentScanState.isScanning && activeScanChild) {
-    if (effectiveUser && currentScanState.activeUser && effectiveUser.toLowerCase() !== currentScanState.activeUser.toLowerCase()) {
+    if (
+      effectiveUser &&
+      currentScanState.activeUser &&
+      effectiveUser.toLowerCase() !== currentScanState.activeUser.toLowerCase()
+    ) {
       stopActiveScan();
     } else {
       return false; // Already in progress for this user
@@ -634,7 +801,8 @@ function triggerBackgroundDeepScan(limit = 50, batches = 50, batchSize = 75, wor
   }
 
   const priorScanned = currentScanState.scannedMessages || 0;
-  const priorReels = currentScanState.totalReels || 
+  const priorReels =
+    currentScanState.totalReels ||
     (currentScanState.friends && currentScanState.friends.length
       ? currentScanState.friends.reduce((acc, f: any) => acc + (Number(f.totalReels) || 0), 0)
       : 0);
@@ -645,7 +813,7 @@ function triggerBackgroundDeepScan(limit = 50, batches = 50, batchSize = 75, wor
     totalBatches: batches,
     scannedMessages: priorScanned,
     totalReels: priorReels,
-    status: `Launching swarm of ${workers} concurrent batch workers (75 msgs/load)...`,
+    status: `Launching swarm of ${workers} concurrent batch workers (${batchSize} msgs/load)...`,
     friends: currentScanState.friends && currentScanState.friends.length ? currentScanState.friends : [],
     activeUser: effectiveUser,
     lastUpdated: Date.now(),
@@ -655,23 +823,29 @@ function triggerBackgroundDeepScan(limit = 50, batches = 50, batchSize = 75, wor
   const scriptPath = path.join(__dirname, 'scan_bridge.py');
   const spawnArgs = [
     scriptPath,
-    '--action', 'deep_stream',
-    '--limit', String(limit),
-    '--batches', String(batches),
-    '--batch-size', String(batchSize),
-    '--workers', String(workers),
+    '--action',
+    'deep_stream',
+    '--limit',
+    String(limit),
+    '--batches',
+    String(batches),
+    '--batch-size',
+    String(batchSize),
+    '--workers',
+    String(workers),
   ];
   if (effectiveUser) {
     spawnArgs.push('--username', effectiveUser);
   }
 
-  const child = spawn('python', spawnArgs, {
+  const child = spawn(getPythonCommand(), spawnArgs, {
     windowsHide: true,
     env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
   });
 
   activeScanChild = child;
   let buffer = '';
+  let fellBackToNode = false;
 
   child.stdout.on('data', (chunk) => {
     buffer += chunk.toString('utf8');
@@ -683,6 +857,11 @@ function triggerBackgroundDeepScan(limit = 50, batches = 50, batchSize = 75, wor
       if (!trimmed || !trimmed.startsWith('{')) continue;
       try {
         const evt = JSON.parse(trimmed);
+        if (evt.code === 'NO_INSTAGRAPI' || evt.status === 'fail') {
+          fellBackToNode = true;
+          runNodeBackgroundDeepScan(effectiveUser, Math.min(8, batches));
+          return;
+        }
         if (evt.type === 'progress' || evt.status === 'progress') {
           const w = evt.swarmWorkers || workers;
           currentScanState = {
@@ -721,22 +900,20 @@ function triggerBackgroundDeepScan(limit = 50, batches = 50, batchSize = 75, wor
 
   child.on('close', (code) => {
     activeScanChild = null;
+    if (fellBackToNode) return;
     currentScanState.isScanning = false;
     if (currentScanState.status !== 'complete') {
       currentScanState.status = code === 0 ? 'complete' : 'idle';
     }
     broadcastScanState('done', currentScanState);
-    // Auto-schedule continuous background refresh in 35 seconds
-    scheduleNextBackgroundSync(35000);
   });
 
-  child.on('error', (err) => {
+  child.on('error', () => {
     activeScanChild = null;
-    currentScanState.isScanning = false;
-    currentScanState.status = 'error';
-    currentScanState.error = err.message;
-    broadcastScanState('error', currentScanState);
-    scheduleNextBackgroundSync(45000);
+    if (!fellBackToNode) {
+      fellBackToNode = true;
+      runNodeBackgroundDeepScan(effectiveUser, Math.min(8, batches));
+    }
   });
 
   return true;
@@ -745,14 +922,18 @@ function triggerBackgroundDeepScan(limit = 50, batches = 50, batchSize = 75, wor
 async function runPythonScanBridge(args: string[]): Promise<any> {
   return new Promise((resolve) => {
     const scriptPath = path.join(__dirname, 'scan_bridge.py');
-    const child = spawn('python', [scriptPath, ...args], {
+    const child = spawn(getPythonCommand(), [scriptPath, ...args], {
       windowsHide: true,
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
     });
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (d) => { stdout += d.toString('utf8'); });
-    child.stderr.on('data', (d) => { stderr += d.toString('utf8'); });
+    child.stdout.on('data', (d) => {
+      stdout += d.toString('utf8');
+    });
+    child.stderr.on('data', (d) => {
+      stderr += d.toString('utf8');
+    });
     child.on('close', (code) => {
       try {
         const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
@@ -774,16 +955,9 @@ async function runPythonScanBridge(args: string[]): Promise<any> {
       }
     });
     child.on('error', (err) => {
-      resolve({ status: 'fail', message: err.message });
+      resolve({ status: 'fail', code: 'NO_PYTHON', message: err.message });
     });
   });
-}
-
-async function loginViaPythonInstagrapi(username: string, password: string, verificationCode = ''): Promise<any> {
-  const args = ['--action', verificationCode ? '2fa' : 'login', '--username', username];
-  if (password) args.push('--password', password);
-  if (verificationCode) args.push('--code', verificationCode);
-  return runPythonScanBridge(args);
 }
 
 app.get('/api/ig/live-scan-stream', (_req, res) => {
@@ -805,22 +979,8 @@ app.get('/api/ig/live-scan-status', (_req, res) => {
   res.json(currentScanState);
 });
 
-app.get('/api/ig/bg-sync-status', (_req, res) => {
-  const now = Date.now();
-  const nextInSec = Math.max(0, Math.round((nextBgSyncTargetTime - now) / 1000));
-  res.json({
-    status: 'active',
-    activeUser: currentScanState.activeUser,
-    isScanning: currentScanState.isScanning,
-    lastSyncTime: lastBgSyncTime ? new Date(lastBgSyncTime).toISOString() : null,
-    nextSyncInSec: nextInSec,
-    totalReels: currentScanState.totalReels,
-    friendCount: currentScanState.friends ? currentScanState.friends.length : 0,
-  });
-});
-
 app.post('/api/ig/start-deep-scan', (req, res) => {
-  const limit = Math.min(100, Math.max(5, Number(req.body?.limit) || 50));
+  const limit = Math.min(30, Math.max(5, Number(req.body?.limit) || 20));
   const batches = Math.min(200, Math.max(2, Number(req.body?.batches) || 50));
   const batchSize = Math.min(100, Math.max(10, Number(req.body?.batchSize) || 75));
   const workers = Math.min(6, Math.max(2, Number(req.body?.workers) || 4));
@@ -833,13 +993,39 @@ app.post('/api/ig/start-deep-scan', (req, res) => {
   });
 });
 
+app.post('/api/ig/refresh-ghost-radar', async (req, res) => {
+  try {
+    const reqUser = String(req.body?.username || currentScanState.activeUser || '').trim().replace(/^@/, '');
+    const saved = loadSavedCookiesForUser(reqUser);
+    if (saved) {
+      const scanResult = await scanLiveInstagramInbox(saved.cookies, saved.username, 1);
+      if (scanResult.friends && scanResult.friends.length > 0) {
+        currentScanState.friends = scanResult.friends;
+        currentScanState.activeUser = scanResult.username;
+      }
+      return res.json({
+        status: 'ok',
+        username: scanResult.username,
+        friends: scanResult.friends,
+      });
+    }
+    return res.json({
+      status: 'cached',
+      friends: currentScanState.friends || [],
+    });
+  } catch (err: any) {
+    return res.status(400).json({ status: 'fail', message: err.message });
+  }
+});
+
 app.get('/api/ig/saved-accounts', async (_req, res) => {
   try {
     const toolkitDir = path.join(os.homedir(), '.ig_toolkit');
     const vaultsDir = path.join(toolkitDir, 'vaults');
     const sessionsDir = path.join(toolkitDir, 'sessions');
     const userTxt = path.join(toolkitDir, 'user.txt');
-    const activeUser = (fs.existsSync(userTxt) ? fs.readFileSync(userTxt, 'utf8').trim() : '') || currentScanState.activeUser || '';
+    const activeUser =
+      (fs.existsSync(userTxt) ? fs.readFileSync(userTxt, 'utf8').trim() : '') || currentScanState.activeUser || '';
 
     const accountsMap: Record<string, any> = {};
 
@@ -928,6 +1114,7 @@ app.post('/api/ig/switch-account', async (req, res) => {
 
     // 2. Set active user in user.txt
     try {
+      fs.mkdirSync(toolkitDir, { recursive: true });
       fs.writeFileSync(userTxt, rawUser, 'utf8');
     } catch (_) {}
 
@@ -939,19 +1126,15 @@ app.post('/api/ig/switch-account', async (req, res) => {
         fs.copyFileSync(userSessionFile, mainSession);
         hasSession = true;
       } catch (_) {}
-    } else {
-      // Check if current mainSession belongs to this user
-      if (fs.existsSync(mainSession)) {
-        try {
-          const sess = JSON.parse(fs.readFileSync(mainSession, 'utf8'));
-          if (sess.username && sess.username.toLowerCase() === safeU) {
-            hasSession = true;
-          } else {
-            // Unlink mainSession so we don't leak user A's credentials to user B
-            fs.unlinkSync(mainSession);
-          }
-        } catch (_) {}
-      }
+    } else if (fs.existsSync(mainSession)) {
+      try {
+        const sess = JSON.parse(fs.readFileSync(mainSession, 'utf8'));
+        if (sess.username && sess.username.toLowerCase() === safeU) {
+          hasSession = true;
+        } else {
+          fs.unlinkSync(mainSession);
+        }
+      } catch (_) {}
     }
 
     // 4. Load vault data for this specific user
@@ -980,8 +1163,8 @@ app.post('/api/ig/switch-account', async (req, res) => {
     broadcastScanState('status', currentScanState);
 
     // 6. If user has a valid session, auto-trigger background deep-scan for this specific user
-    if (hasSession) {
-      setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, rawUser), 400);
+    if (hasSession && rawUser !== 'demo_syndicate') {
+      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, rawUser), 400);
     }
 
     return res.json({
@@ -1014,31 +1197,14 @@ app.get('/api/ig/saved-session', async (req, res) => {
     }
   } catch {}
 
-  const toolkitDir = path.join(os.homedir(), '.ig_toolkit');
-  const safeReq = reqUser.toLowerCase().replace(/[^a-z0-9_.]/g, '');
-  const candidatePaths = [
-    safeReq ? path.join(toolkitDir, 'sessions', `${safeReq}.json`) : null,
-    path.join(toolkitDir, 'session.json'),
-    path.join(os.homedir(), '.ig_reel_counter', 'session.json'),
-    path.join(__dirname, 'session.json'),
-  ].filter(Boolean) as string[];
-
-  for (const cp of candidatePaths) {
-    if (fs.existsSync(cp)) {
-      try {
-        const sess = JSON.parse(fs.readFileSync(cp, 'utf8'));
-        const sid = sess.authorization_data?.sessionid || sess.cookies?.sessionid;
-        const uid = sess.authorization_data?.ds_user_id || sess.cookies?.ds_user_id;
-        const userTxt = path.join(path.dirname(cp), 'user.txt');
-        const username = fs.existsSync(userTxt) ? fs.readFileSync(userTxt, 'utf8').trim() : (sess.username || 'cached_user');
-        if (sid) {
-          if (reqUser && username.toLowerCase() !== reqUser.toLowerCase()) {
-            continue; // Not matching requested user
-          }
-          return res.json({ exists: true, username, sessionid: sid, ds_user_id: uid });
-        }
-      } catch {}
-    }
+  const saved = loadSavedCookiesForUser(reqUser);
+  if (saved && saved.cookies.sessionid) {
+    return res.json({
+      exists: true,
+      username: saved.username,
+      sessionid: saved.cookies.sessionid,
+      ds_user_id: saved.cookies.ds_user_id || '',
+    });
   }
   return res.json({ exists: false });
 });
@@ -1046,7 +1212,7 @@ app.get('/api/ig/saved-session', async (req, res) => {
 app.post('/api/ig/saved-session-scan', async (req, res) => {
   try {
     const rawUser = String(req.body?.username || '').trim().replace(/^@/, '');
-    console.log(`[ReelWrapped] Running saved session scan via Python bridge for user: ${rawUser || 'default'}...`);
+    console.log(`[ReelWrapped] Running saved session scan for user: ${rawUser || 'default'}...`);
     const bridgeArgs = ['--action', 'saved_session_scan', '--limit', '15', '--batches', '4', '--batch-size', '40'];
     if (rawUser) {
       bridgeArgs.push('--username', rawUser);
@@ -1057,12 +1223,25 @@ app.post('/api/ig/saved-session-scan', async (req, res) => {
       if (scanResult.friends) {
         currentScanState.friends = scanResult.friends;
         currentScanState.activeUser = activeUser;
-        currentScanState.totalReels = scanResult.friends.reduce((acc: number, f: any) => acc + (Number(f.totalReels) || 0), 0);
+        currentScanState.totalReels = scanResult.friends.reduce(
+          (acc: number, f: any) => acc + (Number(f.totalReels) || 0),
+          0
+        );
       }
-      // Auto-trigger continuous deep-scan in background for this specific user
-      setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, activeUser), 500);
+      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, activeUser), 500);
       return res.json(scanResult);
     }
+
+    // Fallback to Node.js saved cookies if Python instagrapi wasn't available
+    const saved = loadSavedCookiesForUser(rawUser);
+    if (saved) {
+      const nodeScan = await scanLiveInstagramInbox(saved.cookies, saved.username, 3);
+      currentScanState.friends = nodeScan.friends;
+      currentScanState.activeUser = nodeScan.username;
+      currentScanState.totalReels = nodeScan.totalReels;
+      return res.json({ status: 'ok', authMethod: 'node_saved_session', ...nodeScan });
+    }
+
     return res.status(400).json(scanResult || { status: 'fail', message: 'Could not load saved session.' });
   } catch (err: any) {
     return res.status(500).json({ status: 'fail', message: err.message || 'Saved session scan failed.' });
@@ -1077,6 +1256,7 @@ function getLocalBrowserExecutable(): string | null {
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
     '/usr/bin/google-chrome',
     '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   ];
   for (const c of candidates) {
@@ -1128,7 +1308,9 @@ async function launchInteractiveBrowserLogin(): Promise<{
           clearInterval(checkInterval);
           if (!resolved) {
             resolved = true;
-            try { await browser.close(); } catch (_) {}
+            try {
+              await browser.close();
+            } catch (_) {}
             activeLoginBrowser = null;
             reject(new Error('Login timed out (3 minutes exceeded).'));
           }
@@ -1170,7 +1352,9 @@ async function launchInteractiveBrowserLogin(): Promise<{
             } catch (_) {}
 
             setTimeout(async () => {
-              try { await browser.close(); } catch (_) {}
+              try {
+                await browser.close();
+              } catch (_) {}
               activeLoginBrowser = null;
             }, 600);
 
@@ -1221,7 +1405,6 @@ app.post('/api/ig/chrome-login', async (_req, res) => {
     });
   }
 });
-
 
 async function igLoginGetPage(): Promise<{
   cookies: Record<string, string>;
@@ -1342,13 +1525,13 @@ app.post('/api/ig/login', async (req, res) => {
     // ONLY use saved session fast-path if user did NOT provide an explicit password
     if (!hasPassword) {
       const check = await runPythonScanBridge(['--action', 'check_session', '--username', cleanUsername || '']);
-      const isCachedUser = check?.exists && (!cleanUsername || (check.username && cleanUsername.toLowerCase() === check.username.toLowerCase()));
+      const isCachedUser =
+        check?.exists && (!cleanUsername || (check.username && cleanUsername.toLowerCase() === check.username.toLowerCase()));
 
       if (isCachedUser || sessionid === 'active_local_session') {
         const activeUser = check?.username || cleanUsername || 'user';
         console.log(`[ReelWrapped] Using verified local toolkit session for @${activeUser}`);
 
-        // Fast-path: If local vault already has data, respond INSTANTLY and kick off progressive deep scan in background!
         const safeU = activeUser.toLowerCase().replace(/[^a-z0-9_.]/g, '');
         const userVault = path.join(os.homedir(), '.ig_toolkit', 'vaults', `${safeU}.json`);
         let cachedFriends: any[] = [];
@@ -1361,8 +1544,11 @@ app.post('/api/ig/login', async (req, res) => {
         if (cachedFriends.length > 0) {
           currentScanState.friends = cachedFriends;
           currentScanState.activeUser = activeUser;
-          currentScanState.totalReels = cachedFriends.reduce((acc: number, f: any) => acc + (Number(f.totalReels) || 0), 0);
-          setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, activeUser), 300);
+          currentScanState.totalReels = cachedFriends.reduce(
+            (acc: number, f: any) => acc + (Number(f.totalReels) || 0),
+            0
+          );
+          setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, activeUser), 300);
           return res.json({
             status: 'ok',
             authMethod: 'local_vault_fast',
@@ -1373,12 +1559,33 @@ app.post('/api/ig/login', async (req, res) => {
           });
         }
 
-        const bridgeRes2 = await runPythonScanBridge(['--action', 'saved_session_scan', '--username', cleanUsername || '', '--limit', '10', '--batches', '2', '--batch-size', '30']);
+        const bridgeRes2 = await runPythonScanBridge([
+          '--action',
+          'saved_session_scan',
+          '--username',
+          cleanUsername || '',
+          '--limit',
+          '10',
+          '--batches',
+          '2',
+          '--batch-size',
+          '30',
+        ]);
         if (bridgeRes2 && (bridgeRes2.status === 'ok' || bridgeRes2.type === 'complete')) {
           if (bridgeRes2.friends) currentScanState.friends = bridgeRes2.friends;
           currentScanState.activeUser = activeUser;
-          setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, activeUser), 500);
+          setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, activeUser), 500);
           return res.json(bridgeRes2);
+        }
+
+        // Node.js saved-cookies fallback if Python instagrapi is unavailable
+        const saved = loadSavedCookiesForUser(activeUser);
+        if (saved) {
+          const scanResult = await scanLiveInstagramInbox(saved.cookies, saved.username);
+          if (scanResult.friends) currentScanState.friends = scanResult.friends;
+          currentScanState.activeUser = scanResult.username;
+          setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, scanResult.username), 500);
+          return res.json({ status: 'ok', authMethod: 'node_saved_session', ...scanResult });
         }
       }
     }
@@ -1410,6 +1617,8 @@ app.post('/api/ig/login', async (req, res) => {
 
       const scanResult = await scanLiveInstagramInbox(cookies, cleanUsername || 'you');
       if (scanResult.friends) currentScanState.friends = scanResult.friends;
+      currentScanState.activeUser = scanResult.username;
+      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, scanResult.username), 500);
       return res.json({ status: 'ok', authMethod: 'sessionid', ...scanResult });
     }
 
@@ -1423,37 +1632,44 @@ app.post('/api/ig/login', async (req, res) => {
     // 3. Primary Authentication: Native Python Instagrapi Bridge
     console.log(`[ReelWrapped] Authenticating @${cleanUsername} via Python instagrapi bridge...`);
     const bridgeRes = await runPythonScanBridge([
-      '--action', 'login',
-      '--username', cleanUsername,
-      '--password', password || '',
-      '--limit', '10',
-      '--batches', '2',
-      '--batch-size', '30',
+      '--action',
+      'login',
+      '--username',
+      cleanUsername,
+      '--password',
+      password || '',
+      '--limit',
+      '10',
+      '--batches',
+      '2',
+      '--batch-size',
+      '30',
     ]);
 
     if (bridgeRes && bridgeRes.status === 'two_factor_required') {
       return res.json({
         status: 'two_factor_required',
         username: cleanUsername,
-        two_factor_identifier: 'py_2fa',
+        two_factor_identifier: bridgeRes.two_factor_identifier || 'py_2fa',
       });
     }
 
     if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
-      // Return fast success with any available vault data for this specific user
       const safeU = cleanUsername.toLowerCase().replace(/[^a-z0-9_.]/g, '');
       const userVault = path.join(os.homedir(), '.ig_toolkit', 'vaults', `${safeU}.json`);
       let friendsList = bridgeRes.friends || [];
       if (!friendsList.length && fs.existsSync(userVault)) {
-        try { friendsList = JSON.parse(fs.readFileSync(userVault, 'utf8')); } catch (_) {}
+        try {
+          friendsList = JSON.parse(fs.readFileSync(userVault, 'utf8'));
+        } catch (_) {}
       }
 
       currentScanState.friends = friendsList;
+      currentScanState.activeUser = bridgeRes.username || cleanUsername;
       currentScanState.totalReels = friendsList.reduce((acc: number, f: any) => acc + (Number(f.totalReels) || 0), 0);
       currentScanState.scannedMessages = 0;
 
-      // Trigger background swarm scanning for live progressive feed for this specific user
-      setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, cleanUsername), 500);
+      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, cleanUsername), 500);
 
       return res.json({
         status: 'ok',
@@ -1463,6 +1679,55 @@ app.post('/api/ig/login', async (req, res) => {
         friends: friendsList,
         totalScanned: friendsList.length,
         message: bridgeRes.message || `Authenticated as @${cleanUsername}. Swarm scanner active!`,
+      });
+    }
+
+    // 4. Automatic Fallback: Native Node.js Web AJAX Encryption Handshake when Python instagrapi is not installed
+    if (
+      hasPassword &&
+      (!bridgeRes || bridgeRes.code === 'NO_INSTAGRAPI' || bridgeRes.code === 'NO_PYTHON')
+    ) {
+      console.log(`[ReelWrapped] Python instagrapi not found; authenticating @${cleanUsername} via Node.js TLS Encryption...`);
+      const pageData = await igLoginGetPage();
+      const encPwd = encryptInstagramPassword(pageData.keyId, pageData.pubKeyHex, password);
+      const loginResp = await igLoginPost(cleanUsername, encPwd, pageData.cookies, pageData.csrfToken);
+
+      if (loginResp.json?.two_factor_required) {
+        const tfId = loginResp.json?.two_factor_info?.two_factor_identifier || '';
+        return res.json({
+          status: 'two_factor_required',
+          username: cleanUsername,
+          two_factor_identifier: tfId,
+          cookies: loginResp.cookies,
+        });
+      }
+
+      if (loginResp.cookies?.sessionid || loginResp.json?.authenticated) {
+        const scanResult = await scanLiveInstagramInbox(loginResp.cookies, cleanUsername);
+        currentScanState.friends = scanResult.friends;
+        currentScanState.activeUser = scanResult.username;
+        currentScanState.totalReels = scanResult.totalReels;
+        setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, scanResult.username), 500);
+        return res.json({
+          status: 'ok',
+          authMethod: 'node_web_ajax',
+          ...scanResult,
+        });
+      }
+
+      if (loginResp.status === 429 || loginResp.json?.spam) {
+        return res.status(429).json({
+          status: 'fail',
+          code: 'RATE_LIMIT',
+          message: 'Instagram temporarily rate-limited direct password login from this IP. Use 1-Click Chrome Login or paste your sessionid cookie.',
+        });
+      }
+
+      return res.status(400).json({
+        status: 'fail',
+        message:
+          loginResp.json?.message ||
+          'Instagram rejected the login request. Please check your credentials or use 1-Click Chrome Login.',
       });
     }
 
@@ -1485,22 +1750,66 @@ app.post('/api/ig/login', async (req, res) => {
 
 app.post('/api/ig/2fa', async (req, res) => {
   try {
-    const { username, verification_code } = req.body || {};
+    const { username, verification_code, two_factor_identifier, cookies } = req.body || {};
     const cleanUsername = String(username || 'user').trim().replace(/^@/, '');
     const code = String(verification_code || '').trim();
 
     console.log(`[ReelWrapped] Submitting 2FA verification for @${cleanUsername}...`);
+
+    // If Node.js Web AJAX 2FA cookies + identifier were provided
+    if (two_factor_identifier && two_factor_identifier !== 'py_2fa' && cookies && typeof cookies === 'object') {
+      const csrf = cookies['csrftoken'] || '';
+      const bodyStr = new URLSearchParams({
+        username: cleanUsername,
+        verificationCode: code,
+        identifier: String(two_factor_identifier),
+        queryParams: '{}',
+      }).toString();
+
+      const tfRes = await rawHttpsRequest(
+        'https://www.instagram.com/api/v1/web/accounts/login/ajax/two_factor/',
+        'POST',
+        {
+          'User-Agent': IG_WEB_UA,
+          Accept: '*/*',
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-CSRFToken': csrf,
+          'X-Instagram-AJAX': '1018314112',
+          'X-IG-App-ID': IG_WEB_APP_ID,
+          Referer: 'https://www.instagram.com/accounts/login/two_factor',
+          Origin: 'https://www.instagram.com',
+          Cookie: formatCookieHeader(cookies),
+        },
+        bodyStr
+      );
+      const updatedCookies = extractCookies(tfRes.headers, cookies);
+      if (updatedCookies.sessionid) {
+        const scanResult = await scanLiveInstagramInbox(updatedCookies, cleanUsername);
+        currentScanState.friends = scanResult.friends;
+        currentScanState.activeUser = scanResult.username;
+        setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, scanResult.username), 500);
+        return res.json({ status: 'ok', authMethod: 'node_2fa', ...scanResult });
+      }
+    }
+
     const bridgeRes = await runPythonScanBridge([
-      '--action', '2fa',
-      '--username', cleanUsername,
-      '--code', code,
-      '--limit', '10',
-      '--batches', '2',
-      '--batch-size', '30',
+      '--action',
+      '2fa',
+      '--username',
+      cleanUsername,
+      '--code',
+      code,
+      '--limit',
+      '10',
+      '--batches',
+      '2',
+      '--batch-size',
+      '30',
     ]);
 
     if (bridgeRes && (bridgeRes.status === 'ok' || bridgeRes.type === 'complete')) {
-      setTimeout(() => triggerBackgroundDeepScan(50, 50, 75, 4, cleanUsername), 500);
+      setTimeout(() => triggerBackgroundDeepScan(20, 50, 75, 4, cleanUsername), 500);
       return res.json(bridgeRes);
     }
     return res.status(400).json(bridgeRes || { status: 'fail', message: '2FA verification failed' });
@@ -1509,11 +1818,31 @@ app.post('/api/ig/2fa', async (req, res) => {
   }
 });
 
+const ALLOWED_MEDIA_HOST_SUFFIXES = [
+  'cdninstagram.com',
+  'fbcdn.net',
+  'instagram.com',
+  'unsplash.com',
+  'mixkit.co',
+];
+
 app.get('/api/ig/media-proxy', (req, res) => {
   const targetUrl = String(req.query.url || '');
   if (!targetUrl.startsWith('https://')) {
     return res.status(400).send('Invalid media URL');
   }
+  try {
+    const parsed = new URL(targetUrl);
+    const allowed = ALLOWED_MEDIA_HOST_SUFFIXES.some(
+      (suffix) => parsed.hostname === suffix || parsed.hostname.endsWith(`.${suffix}`)
+    );
+    if (!allowed) {
+      return res.status(403).send('Media hostname not permitted');
+    }
+  } catch {
+    return res.status(400).send('Malformed media URL');
+  }
+
   const headers: Record<string, string> = {
     'User-Agent': IG_ANDROID_UA,
     Accept: '*/*',
@@ -1522,19 +1851,15 @@ app.get('/api/ig/media-proxy', (req, res) => {
     headers['Range'] = req.headers.range as string;
   }
   https
-    .get(
-      targetUrl,
-      { headers },
-      (upRes) => {
-        res.status(upRes.statusCode || 200);
-        if (upRes.headers['content-type']) res.setHeader('Content-Type', upRes.headers['content-type']);
-        if (upRes.headers['content-length']) res.setHeader('Content-Length', upRes.headers['content-length']);
-        if (upRes.headers['content-range']) res.setHeader('Content-Range', upRes.headers['content-range']);
-        if (upRes.headers['accept-ranges']) res.setHeader('Accept-Ranges', upRes.headers['accept-ranges']);
-        res.setHeader('Cache-Control', 'public, max-age=3600');
-        upRes.pipe(res);
-      }
-    )
+    .get(targetUrl, { headers }, (upRes) => {
+      res.status(upRes.statusCode || 200);
+      if (upRes.headers['content-type']) res.setHeader('Content-Type', upRes.headers['content-type']);
+      if (upRes.headers['content-length']) res.setHeader('Content-Length', upRes.headers['content-length']);
+      if (upRes.headers['content-range']) res.setHeader('Content-Range', upRes.headers['content-range']);
+      if (upRes.headers['accept-ranges']) res.setHeader('Accept-Ranges', upRes.headers['accept-ranges']);
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      upRes.pipe(res);
+    })
     .on('error', () => res.status(502).send('Media proxy stream failed'));
 });
 
@@ -1550,19 +1875,15 @@ app.get('/api/ig/reel-video', async (req, res) => {
       return res.status(400).json({ status: 'fail', message: 'URL or shortcode is required' });
     }
 
-    const bridgeRes = await runPythonScanBridge([
-      '--action', 'resolve_reel_video',
-      '--url', target,
-    ]);
+    const bridgeRes = await runPythonScanBridge(['--action', 'resolve_reel_video', '--url', target]);
 
-    if (bridgeRes && bridgeRes.status === 'ok') {
-      const directUrl = bridgeRes.directUrl
-        ? `/api/ig/media-proxy?url=${encodeURIComponent(bridgeRes.directUrl)}`
-        : '';
+    if (bridgeRes && bridgeRes.status === 'ok' && bridgeRes.directUrl) {
+      const directUrl = `/api/ig/media-proxy?url=${encodeURIComponent(bridgeRes.directUrl)}`;
       const thumbUrl = bridgeRes.thumbnailUrl
         ? `/api/ig/media-proxy?url=${encodeURIComponent(bridgeRes.thumbnailUrl)}`
         : '';
-      const finalEmbed = bridgeRes.embedUrl || (bridgeRes.shortcode ? `https://www.instagram.com/reel/${bridgeRes.shortcode}/embed/` : '');
+      const finalEmbed =
+        bridgeRes.embedUrl || (bridgeRes.shortcode ? `https://www.instagram.com/reel/${bridgeRes.shortcode}/embed/` : '');
       return res.json({
         status: 'ok',
         url: target,
@@ -1580,13 +1901,36 @@ app.get('/api/ig/reel-video', async (req, res) => {
     let extractedCode = shortcode;
     const m = target.match(/\/(?:reel|reels|p)\/([A-Za-z0-9_-]+)/);
     if (m) extractedCode = m[1];
+
+    // Node.js fallback: check if we can extract video_url from embed HTML
+    let nodeDirectUrl = '';
+    if (extractedCode) {
+      try {
+        const embedRes = await rawHttpsRequest(
+          `https://www.instagram.com/reel/${extractedCode}/embed/captioned/`,
+          'GET',
+          { 'User-Agent': IG_WEB_UA }
+        );
+        const vMatch = embedRes.body.match(/"video_url"\s*:\s*"([^"]+)"/);
+        if (vMatch && vMatch[1]) {
+          const decodedUrl = vMatch[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+          if (decodedUrl.startsWith('https://')) {
+            nodeDirectUrl = `/api/ig/media-proxy?url=${encodeURIComponent(decodedUrl)}`;
+          }
+        }
+      } catch {}
+    }
+
+    const embedUrl = extractedCode ? `https://www.instagram.com/reel/${extractedCode}/embed/` : '';
     return res.json({
       status: 'ok',
       url: target,
       shortcode: extractedCode,
-      directUrl: '',
+      directUrl: nodeDirectUrl,
+      direct_url: nodeDirectUrl,
       thumbnailUrl: '',
-      embedUrl: extractedCode ? `https://www.instagram.com/reel/${extractedCode}/embed/` : '',
+      embedUrl,
+      embed_url: embedUrl,
       caption: '',
     });
   } catch (err: any) {
@@ -1594,9 +1938,33 @@ app.get('/api/ig/reel-video', async (req, res) => {
   }
 });
 
+app.get('/api/download-clean-repo', (_req, res) => {
+  res.setHeader('Content-Type', 'application/gzip');
+  res.setHeader('Content-Disposition', 'attachment; filename="reel-wrapped-clean.tar.gz"');
+  const tar = spawn(
+    'tar',
+    [
+      '-czf',
+      '-',
+      '--exclude=node_modules',
+      '--exclude=.git',
+      '--exclude=dist',
+      '--exclude=session.json',
+      '--exclude=.env',
+      '.',
+    ],
+    { cwd: __dirname }
+  );
+  tar.stdout.pipe(res);
+  tar.on('error', () => {
+    if (!res.headersSent) res.status(500).end('Archive generation failed');
+  });
+});
+
 app.get('/api/friends', (req, res) => {
   const reqUser = String(req.query.user || '').trim().replace(/^@/, '').toLowerCase();
-  const safeU = reqUser || (currentScanState.activeUser ? currentScanState.activeUser.toLowerCase().replace(/[^a-z0-9_.]/g, '') : '');
+  const safeU =
+    reqUser || (currentScanState.activeUser ? currentScanState.activeUser.toLowerCase().replace(/[^a-z0-9_.]/g, '') : '');
   if (safeU) {
     const userVault = path.join(os.homedir(), '.ig_toolkit', 'vaults', `${safeU}.json`);
     if (fs.existsSync(userVault)) {
@@ -1614,11 +1982,11 @@ app.get('/api/friends', (req, res) => {
   res.json([]);
 });
 
-let githubSyncStatus = 'ready';
+const githubSyncStatus = 'ready';
 
 app.get('/api/status', (_req, res) => {
   res.json({
-    engine: 'rust-wasm-hybrid-v2.4',
+    engine: 'rust-wasm-hybrid-v2.6',
     status: 'online',
     zeroCloud: true,
     wasmAccelerated: true,
@@ -1634,7 +2002,7 @@ async function startServer() {
   const activeUser = fs.existsSync(userTxtPath) ? fs.readFileSync(userTxtPath, 'utf8').trim() : '';
   const safeU = activeUser.toLowerCase().replace(/[^a-z0-9_.]/g, '');
 
-  if (safeU) {
+  if (safeU && safeU !== 'demo_syndicate') {
     const userVaultPath = path.join(toolkitDir, 'vaults', `${safeU}.json`);
     if (fs.existsSync(userVaultPath)) {
       try {
@@ -1643,19 +2011,21 @@ async function startServer() {
           currentScanState.friends = cached;
           currentScanState.activeUser = activeUser;
           currentScanState.totalReels = cached.reduce((acc: number, f: any) => acc + (Number(f.totalReels) || 0), 0);
-          console.log(`[ReelWrapped] Preloaded @${activeUser} with ${cached.length} friends (${currentScanState.totalReels} reels) from user vault.`);
+          console.log(
+            `[ReelWrapped] Preloaded @${activeUser} with ${cached.length} friends (${currentScanState.totalReels} reels) from user vault.`
+          );
         }
       } catch {}
     }
 
     const sessionPath = path.join(toolkitDir, 'session.json');
-    if (fs.existsSync(sessionPath) && activeUser && activeUser !== 'demo_syndicate') {
+    if (fs.existsSync(sessionPath)) {
       setTimeout(() => {
-        console.log(`[ReelWrapped] Auto-starting high-throughput swarm deep scan on boot for @${activeUser} (50 chats, 75 msgs/load, 4 workers)...`);
-        triggerBackgroundDeepScan(50, 50, 75, 4, activeUser);
+        console.log(
+          `[ReelWrapped] Auto-starting high-throughput swarm deep scan on boot for @${activeUser} (20 chats, 75 msgs/load, 4 workers)...`
+        );
+        triggerBackgroundDeepScan(20, 50, 75, 4, activeUser);
       }, 1200);
-    } else {
-      scheduleNextBackgroundSync(15000);
     }
   }
 

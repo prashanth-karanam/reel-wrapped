@@ -1,14 +1,10 @@
 // ============================================================================
-// REEL WRAPPED '26 • MULTI-USER LOGIN GATE, IN-APP REEL SPECTATOR & LIVE SYNC
+// REEL WRAPPED '25 • MULTI-USER LOGIN GATE, IN-APP REEL SPECTATOR & LIVE SYNC
 // 100% Local Privacy • Multi-Account Vault Switcher • Zero External Redirects
 // ============================================================================
 
-// Deregister legacy service workers to prevent stale asset caching
-if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then((regs) => {
-    for (const r of regs) r.unregister().catch(() => {});
-  }).catch(() => {});
-}
+// Service worker is managed by index.html for offline PWA caching
+
 
 const IN_APP_REEL_STREAMS = [
   "https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-light-dancing-40031-large.mp4",
@@ -46,14 +42,16 @@ function saveAccountsMap(map) {
 }
 
 function getActiveAccountUsername() {
-  return localStorage.getItem(ACTIVE_USER_STORAGE_KEY) || '';
+  return localStorage.getItem(ACTIVE_USER_STORAGE_KEY) || localStorage.getItem('rw_active_account') || '';
 }
 
 function setActiveAccountUsername(username) {
   if (username) {
     localStorage.setItem(ACTIVE_USER_STORAGE_KEY, username);
+    localStorage.setItem('rw_active_account', username);
   } else {
     localStorage.removeItem(ACTIVE_USER_STORAGE_KEY);
+    localStorage.removeItem('rw_active_account');
   }
   updateHeaderAccountBadge();
 }
@@ -412,13 +410,20 @@ window.triggerGlobalCountRollup = function(durationMs = 700) {
   });
 };
 
+const DEMO_FRIEND_IDS = new Set(['alex', 'sarah', 'marcus', 'priya', 'devon', 'elena']);
+
 function enrichFriendsWithPlayableStreams(list) {
   if (!Array.isArray(list)) return;
+  const activeUser = getActiveAccountUsername();
+  const isDemoProfile = activeUser === 'demo_syndicate';
   list.forEach((f, fIdx) => {
     if (!Array.isArray(f.ghostMessages)) f.ghostMessages = [];
+    const isDemoFriend = isDemoProfile || DEMO_FRIEND_IDS.has(String(f.id || ''));
     f.ghostMessages.forEach((m, mIdx) => {
       if (m.is_reel) {
-        if (!m.video_url) {
+        // Only attach fallback stock preview streams to Demo Mode profiles.
+        // Real Instagram accounts use their authentic CDN video_url or Instagram Embed iframe.
+        if (!m.video_url && isDemoFriend) {
           m.video_url = IN_APP_REEL_STREAMS[(fIdx + mIdx) % IN_APP_REEL_STREAMS.length];
         }
         if (!m.caption) {
@@ -432,14 +437,15 @@ function enrichFriendsWithPlayableStreams(list) {
 function getPlayableReelItems(friend) {
   const msgs = (friend.ghostMessages || []).filter(m => m.is_reel);
   if (msgs.length > 0) return msgs;
+  const isDemoFriend = DEMO_FRIEND_IDS.has(String(friend.id || '')) || getActiveAccountUsername() === 'demo_syndicate';
   return [{
     time: "02:45",
     sender: friend.name,
     is_me: false,
     is_reel: true,
     creator: (friend.creators && friend.creators[0]) ? friend.creators[0].handle : "@reels",
-    video_url: IN_APP_REEL_STREAMS[0],
-    caption: `${friend.topGenre || 'Viral Reel'} • Read-Only Local Preview`
+    video_url: isDemoFriend ? IN_APP_REEL_STREAMS[0] : "",
+    caption: `${friend.topGenre || 'Shared Reel'} • Read-Only Local Preview`
   }];
 }
 
@@ -488,7 +494,7 @@ window.renderLeaderboard = function(list) {
           
           <div class="space-y-1.5 text-center">
             <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black bg-pink-500/20 text-pink-300 border border-pink-400/30 uppercase tracking-wider mb-1">
-              ✨ 2026 INSTAGRAM REEL WRAPPED
+              ✨ 2025 INSTAGRAM REEL WRAPPED
             </div>
             <h3 class="text-lg font-black tracking-tight">${activeUser ? `@${activeUser}'s DM Stats Are Waiting` : 'Your DM Reel Stats Are Waiting'}</h3>
             <p class="text-xs text-purple-200/90 max-w-sm mx-auto leading-relaxed">
@@ -1366,7 +1372,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 🎬
               </div>
               <div>
-                <h2 class="text-base font-black tracking-tight leading-none">REEL WRAPPED '26</h2>
+                <h2 class="text-base font-black tracking-tight leading-none">REEL WRAPPED '25</h2>
                 <span class="text-[10px] font-mono opacity-90">100% Private • Direct to Instagram</span>
               </div>
             </div>
@@ -1751,19 +1757,22 @@ window.initLiveScanStream = function() {
     } catch (_) {}
   }, 2500);
 
-  // Auto-launch swarm deep scan on authenticated page load if not running
-  fetch('/api/ig/live-scan-status')
-    .then(r => r.json())
-    .then(st => {
-      if (!st.isScanning) {
-        fetch('/api/ig/start-deep-scan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ limit: 20, batches: 50, batchSize: 75, workers: 4 })
-        }).catch(() => {});
-      }
-    })
-    .catch(() => {});
+  // Auto-launch swarm deep scan on authenticated page load ONLY if a real Instagram user is active
+  const currentActive = getActiveAccountUsername();
+  if (currentActive && currentActive !== 'demo_syndicate' && !currentActive.startsWith('json_vault_')) {
+    fetch('/api/ig/live-scan-status')
+      .then(r => r.json())
+      .then(st => {
+        if (!st.isScanning) {
+          fetch('/api/ig/start-deep-scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit: 20, batches: 50, batchSize: 75, workers: 4, username: currentActive })
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }
 };
 
 window.triggerDeeperScan = async function(workers = 4) {

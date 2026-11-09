@@ -238,7 +238,7 @@
           </div>
           <div class="bg-black/20 backdrop-blur-sm rounded-xl p-1.5">
             <span class="block text-[9px] uppercase font-bold text-white/70">Top Hour</span>
-            <span class="font-mono text-sm font-black text-pink-200">02:45 AM</span>
+            <span id="banner-top-hour" class="font-mono text-sm font-black text-pink-200">--:--</span>
           </div>
           <div class="bg-black/20 backdrop-blur-sm rounded-xl p-1.5">
             <span class="block text-[9px] uppercase font-bold text-white/70">WASM Speed</span>
@@ -274,7 +274,7 @@
       </div>
 
       <!-- Live Background Swarm Scanner & Real-Time Loading Bar -->
-      <div id="live-scan-progress-banner" class="mb-4 p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-purple-950 to-indigo-950 border-2 border-purple-500/40 text-white shadow-xl space-y-3 relative overflow-hidden transition-all duration-300">
+      <div id="live-scan-progress-banner" class="hidden mb-4 p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-purple-950 to-indigo-950 border-2 border-purple-500/40 text-white shadow-xl space-y-3 relative overflow-hidden transition-all duration-300">
         <div class="absolute -right-8 -top-8 w-24 h-24 bg-pink-500/20 rounded-full blur-xl pointer-events-none"></div>
 
         <div class="flex items-center justify-between gap-2 relative z-10">
@@ -583,7 +583,7 @@
               🎬
             </div>
             <div>
-              <span class="text-[10px] font-black tracking-widest uppercase block leading-none">REEL WRAPPED '26</span>
+              <span class="text-[10px] font-black tracking-widest uppercase block leading-none">REEL WRAPPED '25</span>
               <span class="text-[8px] font-mono opacity-80">100% LOCAL • ZERO CLOUD</span>
             </div>
           </div>
@@ -598,7 +598,7 @@
             🎬
           </div>
           <span class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-white/20 text-white shadow-sm mb-1.5 border border-white/20">
-            2026 STORY CARD PREVIEW
+            2025 STORY CARD PREVIEW
           </span>
           <h3 class="text-xl font-black tracking-tight leading-tight">
             Your Story Unlocks Here
@@ -831,7 +831,7 @@
       <div class="px-4 flex items-center justify-between z-20">
         <div class="flex items-center gap-2">
           <div class="w-7 h-7 rounded-full brand-gradient-bg flex items-center justify-center font-black text-[10px]">RW</div>
-          <span class="text-xs font-bold">Reel Wrapped '26</span>
+          <span class="text-xs font-bold">Reel Wrapped '25</span>
         </div>
         <button onclick="closeStoryMode()" class="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold">✕</button>
       </div>
@@ -882,24 +882,24 @@
         <h4 class="font-black text-sm text-slate-900">Recent Reel Milestones</h4>
         <button onclick="toggleModal('modal-notifications')" class="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600 hover:text-slate-900">✕ Close</button>
       </div>
-      <div class="space-y-2.5 text-xs">
+      <div id="notifications-list-body" class="space-y-2.5 text-xs">
         <div class="p-3 rounded-2xl bg-amber-50 border border-amber-200/60">
           <div class="font-extrabold text-amber-800 flex items-center gap-1">
             <span>🔥</span> Savage Streak Milestone
           </div>
-          <p class="text-amber-900/80 mt-0.5">Alex Rivera and you just hit 84 days of unbroken reel sharing!</p>
+          <p class="text-amber-900/80 mt-0.5">Connect your Instagram or try Demo mode to view your unbroken reel sharing streaks.</p>
         </div>
         <div class="p-3 rounded-2xl bg-pink-50 border border-pink-200/60">
           <div class="font-extrabold text-pink-700 flex items-center gap-1">
-            <span>👻</span> Ghost Radar Alert
+            <span>👻</span> Ghost Radar Telemetry
           </div>
-          <p class="text-pink-900/80 mt-0.5">Marcus Vance has 2 reels from you sitting on UNSEEN (Delivered).</p>
+          <p class="text-pink-900/80 mt-0.5">Inspects direct_v2/inbox last_seen_at timestamps with read receipts suppressed.</p>
         </div>
         <div class="p-3 rounded-2xl bg-emerald-50 border border-emerald-200/60">
           <div class="font-extrabold text-emerald-800 flex items-center gap-1">
             <span>⚡</span> Rust + WASM Engine Active
           </div>
-          <p class="text-emerald-900/80 mt-0.5">Linear memory streak &amp; ratio telemetry compiled in 0.4ms.</p>
+          <p class="text-emerald-900/80 mt-0.5">Linear memory streak &amp; ratio telemetry compiled on-device.</p>
         </div>
       </div>
       <button onclick="toggleModal('modal-notifications')" class="w-full py-2.5 rounded-xl brand-gradient-bg text-white font-bold text-xs">
@@ -979,10 +979,14 @@
     function wasmComputeStreak(sortedEpochDays) {
       if (!sortedEpochDays || !sortedEpochDays.length) return 1;
       if (wasmExports && wasmExports.compute_streak && wasmExports.memory) {
-        const len = Math.min(sortedEpochDays.length, 8000);
-        const i32 = new Int32Array(wasmExports.memory.buffer);
-        for (let i = 0; i < len; i++) i32[i] = sortedEpochDays[i];
-        return wasmExports.compute_streak(0, len);
+        const byteOffset = 1024;
+        const maxInts = Math.floor((wasmExports.memory.buffer.byteLength - byteOffset) / 4);
+        const len = Math.min(sortedEpochDays.length, Math.max(0, maxInts), 8000);
+        if (len > 0) {
+          const i32 = new Int32Array(wasmExports.memory.buffer, byteOffset, len);
+          for (let i = 0; i < len; i++) i32[i] = sortedEpochDays[i];
+          return wasmExports.compute_streak(byteOffset, len);
+        }
       }
       let maxS = 1, curS = 1;
       for (let i = 1; i < sortedEpochDays.length; i++) {
@@ -1301,14 +1305,14 @@
     ];
 
     window.DEFAULT_FRIENDS = DEFAULT_FRIENDS;
-    const initialActive = localStorage.getItem('rw_active_account') || '';
+    const initialActive = localStorage.getItem('ReelWrapped_ActiveUsername_v2') || localStorage.getItem('rw_active_account') || '';
     let FRIENDS = (initialActive === 'demo_syndicate') ? [...DEFAULT_FRIENDS] : [];
     window.FRIENDS = FRIENDS;
     let currentFilter = 'all';
     let currentFriendId = (FRIENDS.length > 0) ? FRIENDS[0].id : null;
     window.currentFriendId = currentFriendId;
     let currentStoryTheme = 'sunset';
-    let isBiometricActive = true;
+    let isBiometricActive = localStorage.getItem('rw_biometric_lock') !== 'false';
     let activeAudioIdx = -1;
     let audioCtx = null;
     let deferredInstallPrompt = null;
@@ -1524,37 +1528,128 @@
       }
     }
 
+    function formatHourLabel(hour24) {
+      const h = ((hour24 % 24) + 24) % 24;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 === 0 ? 12 : h % 12;
+      return `${String(h12).padStart(2, '0')}:00 ${ampm}`;
+    }
+
+    function normalizeHistogram24(arr) {
+      if (!Array.isArray(arr) || arr.length === 0) return new Array(24).fill(0);
+      if (arr.length >= 24) return arr.slice(0, 24);
+      if (arr.length === 12) {
+        const out = new Array(24).fill(0);
+        for (let i = 0; i < 12; i++) {
+          out[i * 2] = arr[i];
+          out[i * 2 + 1] = Math.round(arr[i] * 0.85);
+        }
+        return out;
+      }
+      const out = new Array(24).fill(0);
+      for (let i = 0; i < arr.length; i++) out[i] = arr[i];
+      return out;
+    }
+
+    function renderNotificationsModal() {
+      const container = document.getElementById('notifications-list-body');
+      if (!container) return;
+      const list = (window.FRIENDS && window.FRIENDS.length > 0) ? window.FRIENDS : (typeof FRIENDS !== 'undefined' && FRIENDS.length ? FRIENDS : []);
+      const speedText = document.getElementById('banner-wasm-speed')?.innerText || '0.4ms';
+      if (!list || list.length === 0) {
+        container.innerHTML = `
+          <div class="p-3 rounded-2xl bg-amber-50 border border-amber-200/60">
+            <div class="font-extrabold text-amber-800 flex items-center gap-1"><span>🔥</span> Savage Streak Milestone</div>
+            <p class="text-amber-900/80 mt-0.5">Connect your Instagram or try Demo mode to calculate your unbroken daily reel streaks.</p>
+          </div>
+          <div class="p-3 rounded-2xl bg-pink-50 border border-pink-200/60">
+            <div class="font-extrabold text-pink-700 flex items-center gap-1"><span>👻</span> Ghost Radar Standby</div>
+            <p class="text-pink-900/80 mt-0.5">No DM threads scanned yet. Connect your account to inspect unseen reels without sending read receipts.</p>
+          </div>
+          <div class="p-3 rounded-2xl bg-emerald-50 border border-emerald-200/60">
+            <div class="font-extrabold text-emerald-800 flex items-center gap-1"><span>⚡</span> Rust + WASM Engine Active</div>
+            <p class="text-emerald-900/80 mt-0.5">Linear memory streak &amp; ratio telemetry compiled in ${speedText}.</p>
+          </div>
+        `;
+        return;
+      }
+      const topStreakFriend = [...list].sort((a, b) => (Number(b.bestStreak || b.streak) || 0) - (Number(a.bestStreak || a.streak) || 0))[0];
+      const unseenFriends = list.filter(f => (f.seenStatus || '').includes('UNSEEN') || (Number(f.unseenCount) || 0) > 0);
+      const streakDays = topStreakFriend ? (topStreakFriend.bestStreak || topStreakFriend.streak || 1) : 1;
+      const ghostMsg = unseenFriends.length > 0
+        ? `${unseenFriends[0].name} has ${unseenFriends[0].unseenCount || 1} reel(s) sitting on UNSEEN (Delivered).`
+        : `All ${list.length} top DM threads have seen your latest reels.`;
+
+      container.innerHTML = `
+        <div class="p-3 rounded-2xl bg-amber-50 border border-amber-200/60">
+          <div class="font-extrabold text-amber-800 flex items-center gap-1"><span>🔥</span> Savage Streak Milestone</div>
+          <p class="text-amber-900/80 mt-0.5">${topStreakFriend.name} and you hit ${streakDays} days of unbroken reel sharing!</p>
+        </div>
+        <div class="p-3 rounded-2xl bg-pink-50 border border-pink-200/60">
+          <div class="font-extrabold text-pink-700 flex items-center gap-1"><span>👻</span> Ghost Radar Alert</div>
+          <p class="text-pink-900/80 mt-0.5">${ghostMsg}</p>
+        </div>
+        <div class="p-3 rounded-2xl bg-emerald-50 border border-emerald-200/60">
+          <div class="font-extrabold text-emerald-800 flex items-center gap-1"><span>⚡</span> Rust + WASM Engine Active</div>
+          <p class="text-emerald-900/80 mt-0.5">Linear memory streak &amp; ratio telemetry compiled in ${speedText}.</p>
+        </div>
+      `;
+    }
+
     function updateGlobalBannerSummary() {
       const list = (window.FRIENDS && window.FRIENDS.length > 0) ? window.FRIENDS : (typeof FRIENDS !== 'undefined' && FRIENDS.length ? FRIENDS : []);
       const totalReels = list.reduce((acc, f) => acc + (Number(f.totalReels) || ((Number(f.friendCount) || 0) + (Number(f.youCount) || 0)) || 0), 0);
       const maxStreak = list.reduce((acc, f) => Math.max(acc, Number(f.bestStreak) || Number(f.streak) || 0), 0);
       const summaryEl = document.getElementById('banner-total-summary');
       const streakEl = document.getElementById('banner-peak-streak');
+      const topHourEl = document.getElementById('banner-top-hour');
       const profEl = document.getElementById('profile-total-reels');
       const filterAllBtn = document.getElementById('filter-all');
       const heroTitle = document.querySelector('#tab-leaderboard .brand-gradient-bg h2');
       const heroBadge = document.querySelector('#tab-leaderboard .brand-gradient-bg span');
-      const activeUser = (typeof getActiveAccountUsername === 'function') ? getActiveAccountUsername() : (localStorage.getItem('rw_active_account') || '');
+      const activeUser = (typeof getActiveAccountUsername === 'function')
+        ? getActiveAccountUsername()
+        : (localStorage.getItem('ReelWrapped_ActiveUsername_v2') || localStorage.getItem('rw_active_account') || '');
 
       if (list.length === 0) {
         if (heroTitle) heroTitle.innerText = activeUser ? `Ready to Scan @${activeUser}` : 'Welcome to Reel Wrapped';
-        if (heroBadge) heroBadge.innerText = '✨ 2026 INSTAGRAM EDITION';
+        if (heroBadge) heroBadge.innerText = '✨ 2025 INSTAGRAM EDITION';
         if (summaryEl) summaryEl.innerHTML = activeUser ? 'Tap below to launch swarm scan on your DM inbox.' : 'Connect your Instagram or try the demo to see who flooded your DMs with reels.';
         if (streakEl) streakEl.innerText = '0 Days';
+        if (topHourEl) topHourEl.innerText = '--:--';
         if (profEl) profEl.innerText = '0 Reels';
         if (filterAllBtn) filterAllBtn.innerText = 'All (0)';
       } else {
         if (heroTitle) {
           heroTitle.innerText = totalReels >= 5000 ? 'You are a Reel Demigod' : totalReels >= 1000 ? 'Reel Heavyweight Champion' : 'Reel Enthusiast';
         }
-        if (heroBadge) heroBadge.innerText = '🔥 GLOBAL TOP 0.8% TIER';
+        if (heroBadge) {
+          heroBadge.innerText = totalReels >= 5000 ? '🔥 GLOBAL TOP 0.8% TIER' : totalReels >= 1000 ? '⚡ GLOBAL TOP 3% TIER' : '✨ VERIFIED DM TELEMETRY';
+        }
         if (summaryEl) {
           summaryEl.innerHTML = `<span class="font-black text-white">${totalReels.toLocaleString()}</span> Reels Exchanged across ${list.length} top friends`;
         }
         if (streakEl) streakEl.innerText = maxStreak > 0 ? `${maxStreak} Days` : '-- Days';
+        if (topHourEl) {
+          const aggHours = new Array(24).fill(0);
+          list.forEach(f => {
+            const h24 = normalizeHistogram24(f.hourlyHistogram);
+            for (let i = 0; i < 24; i++) aggHours[i] += (Number(h24[i]) || 0);
+          });
+          let bestH = 2;
+          let maxHVal = -1;
+          for (let i = 0; i < 24; i++) {
+            if (aggHours[i] > maxHVal) {
+              maxHVal = aggHours[i];
+              bestH = i;
+            }
+          }
+          topHourEl.innerText = maxHVal > 0 ? formatHourLabel(bestH) : '02:00 AM';
+        }
         if (profEl) profEl.innerText = `${totalReels.toLocaleString()} Reels`;
         if (filterAllBtn) filterAllBtn.innerText = `All (${list.length})`;
       }
+      renderNotificationsModal();
     }
 
     function setFilter(filterType) {
@@ -1635,7 +1730,7 @@
               
               <div class="space-y-1.5 text-center">
                 <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black bg-pink-500/20 text-pink-300 border border-pink-400/30 uppercase tracking-wider mb-1">
-                  ✨ 2026 INSTAGRAM REEL WRAPPED
+                  ✨ 2025 INSTAGRAM REEL WRAPPED
                 </div>
                 <h3 class="text-lg font-black tracking-tight">${activeUser ? `@${activeUser}'s DM Stats Are Waiting` : 'Your DM Reel Stats Are Waiting'}</h3>
                 <p class="text-xs text-purple-200/90 max-w-sm mx-auto leading-relaxed">
@@ -1921,28 +2016,38 @@
       // Reactions Matrix
       const reactGrid = document.getElementById('dossier-reactions-grid');
       if (reactGrid) {
-        reactGrid.innerHTML = (f.reactions || []).map((r, idx) => `
-          <button onclick="bumpEmojiReaction('${f.id}', ${idx})" class="flex flex-col items-center p-1.5 rounded-xl bg-slate-50 hover:bg-pink-50 border border-slate-100 active:scale-110 transition-transform flex-1 cursor-pointer">
-            <span class="text-base">${r.emoji}</span>
-            <span class="text-[10px] font-mono font-bold text-slate-700 mt-0.5">${r.count}</span>
-          </button>
-        `).join('');
+        const reacts = f.reactions || [];
+        if (reacts.length === 0) {
+          reactGrid.innerHTML = `<span class="text-[10px] font-mono text-slate-400 py-2">No emoji reactions recorded yet</span>`;
+        } else {
+          reactGrid.innerHTML = reacts.map((r, idx) => `
+            <button onclick="bumpEmojiReaction('${f.id}', ${idx})" class="flex flex-col items-center p-1.5 rounded-xl bg-slate-50 hover:bg-pink-50 border border-slate-100 active:scale-110 transition-transform flex-1 cursor-pointer">
+              <span class="text-base">${r.emoji}</span>
+              <span class="text-[10px] font-mono font-bold text-slate-700 mt-0.5">${r.count}</span>
+            </button>
+          `).join('');
+        }
       }
 
       // Hashtags Cloud
       const tagsCloud = document.getElementById('dossier-hashtags-cloud');
       if (tagsCloud) {
-        tagsCloud.innerHTML = (f.hashtags || []).map(h => `
-          <div class="px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-1.5 text-xs font-bold text-slate-800">
-            <span class="text-purple-600">${h.tag}</span>
-            <span class="text-[10px] font-mono text-slate-400">${h.count}</span>
-          </div>
-        `).join('');
+        const tags = f.hashtags || [];
+        if (tags.length === 0) {
+          tagsCloud.innerHTML = `<span class="text-[11px] font-mono text-slate-400">No hashtags found in scanned reel captions</span>`;
+        } else {
+          tagsCloud.innerHTML = tags.map(h => `
+            <div class="px-2.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-1.5 text-xs font-bold text-slate-800">
+              <span class="text-purple-600">${h.tag}</span>
+              <span class="text-[10px] font-mono text-slate-400">${h.count}</span>
+            </div>
+          `).join('');
+        }
       }
 
       renderAudioTracks(f);
 
-      // Night Owl & Histogram
+      // Night Owl & 24-Hour Histogram
       const nightScoreEl = document.getElementById('dossier-night-score');
       if (nightScoreEl) nightScoreEl.innerText = `${f.nightScore || 0}%`;
       const nightTitleEl = document.getElementById('dossier-night-title');
@@ -1951,13 +2056,14 @@
       if (nightDescEl) nightDescEl.innerText = f.nightDesc || '';
 
       const histEl = document.getElementById('dossier-hourly-bars');
-      if (histEl && f.hourlyHistogram) {
-        const bins = f.hourlyHistogram.slice(0, 12);
+      if (histEl) {
+        const bins = normalizeHistogram24(f.hourlyHistogram);
         const maxVal = Math.max(...bins, 1);
         histEl.innerHTML = bins.map((v, i) => {
-          const hPct = Math.max(12, Math.round((v / maxVal) * 100));
-          const color = hPct > 80 ? 'bg-pink-500' : hPct > 50 ? 'bg-purple-500' : 'bg-slate-700';
-          return `<div class="flex-1 ${color} rounded-t transition-all duration-500" style="height: ${hPct}%"></div>`;
+          const hPct = v > 0 ? Math.max(14, Math.round((v / maxVal) * 100)) : 8;
+          const isNightHour = (i >= 0 && i <= 4) || i === 23;
+          const color = hPct > 80 ? 'bg-pink-500' : isNightHour && v > 0 ? 'bg-purple-500' : hPct > 45 ? 'bg-indigo-500' : 'bg-slate-700';
+          return `<div title="${formatHourLabel(i)}: ${v} reels" class="flex-1 ${color} rounded-t transition-all duration-500" style="height: ${hPct}%"></div>`;
         }).join('');
       }
 
@@ -2084,8 +2190,31 @@
       }
     }
 
-    function refreshGhostRadar() {
+    async function refreshGhostRadar() {
       playUiPop(620);
+      const activeUser = (typeof getActiveAccountUsername === 'function')
+        ? getActiveAccountUsername()
+        : (localStorage.getItem('ReelWrapped_ActiveUsername_v2') || '');
+      if (activeUser && activeUser !== 'demo_syndicate') {
+        showToast('👻 Polling live direct_v2/inbox (Read receipts suppressed)...');
+        try {
+          const res = await fetch('/api/ig/refresh-ghost-radar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: activeUser })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.friends) && data.friends.length > 0) {
+              FRIENDS = data.friends;
+              window.FRIENDS = FRIENDS;
+              await saveFriendsToIndexedDB(FRIENDS);
+              updateGlobalBannerSummary();
+              filterFriendsList();
+            }
+          }
+        } catch (_) {}
+      }
       showToast('👻 Polled direct_v2/inbox (Ghost Mode: Read receipts suppressed)');
       const f = (FRIENDS && FRIENDS.length > 0) ? (FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0]) : null;
       renderGhostRadar(f);
@@ -2126,7 +2255,7 @@
             🎬
           </div>
           <span class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-white/20 text-white shadow-sm mb-1.5 border border-white/20">
-            2026 STORY CARD PREVIEW
+            2025 STORY CARD PREVIEW
           </span>
           <h3 class="text-xl font-black tracking-tight leading-tight">
             ${activeUser ? `@${activeUser}'s Story` : 'Your Story Unlocks Here'}
@@ -2246,7 +2375,7 @@
       `;
     }
 
-    // Renders a real 1080x1920 High-DPI PNG Blob on an HTML5 Canvas
+    // Renders a real 1080x1920 High-DPI PNG Blob on an HTML5 Canvas across all 6 themes
     function renderHighResStoryCanvasBlob() {
       return new Promise((resolve) => {
         const f = (FRIENDS && FRIENDS.length > 0) ? (FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0]) : null;
@@ -2256,8 +2385,146 @@
         canvas.width = 1080;
         canvas.height = 1920;
         const ctx = canvas.getContext('2d');
+        const topHashtag = (f.hashtags && f.hashtags[0]) ? f.hashtags[0].tag : '#reels';
+        const topEmojis = (f.reactions || []).map(r => r.emoji).join(' ') || '🔥 💀 ❤️';
 
-        // Theme Gradient
+        if (currentStoryTheme === 'receipt') {
+          // DOPAMINE SUPERMARKET RECEIPT THEME
+          ctx.fillStyle = '#E2E8F0';
+          ctx.fillRect(0, 0, 1080, 1920);
+          ctx.fillStyle = '#FAF8F5';
+          ctx.beginPath();
+          ctx.roundRect(70, 90, 940, 1740, 32);
+          ctx.fill();
+          ctx.strokeStyle = '#94A3B8';
+          ctx.lineWidth = 4;
+          ctx.setLineDash([16, 12]);
+          ctx.strokeRect(100, 120, 880, 1680);
+          ctx.setLineDash([]);
+
+          ctx.fillStyle = '#0F172A';
+          ctx.textAlign = 'center';
+          ctx.font = '900 56px "JetBrains Mono", monospace';
+          ctx.fillText('DOPAMINE SUPERMARKET', 540, 240);
+          ctx.font = '600 28px "JetBrains Mono", monospace';
+          ctx.fillStyle = '#475569';
+          ctx.fillText(`CUSTOMER: ${(f.name || 'FRIEND').toUpperCase()} (${f.handle})`, 540, 300);
+          ctx.fillText('100% LOCAL DM TELEMETRY • ZERO CLOUD', 540, 345);
+
+          const drawDashedLine = (y) => {
+            ctx.strokeStyle = '#94A3B8';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([12, 10]);
+            ctx.beginPath();
+            ctx.moveTo(140, y);
+            ctx.lineTo(940, y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          };
+
+          drawDashedLine(395);
+
+          const items = [
+            ['1x THEM SENT REELS', `${(f.friendCount || 0).toLocaleString()} (${f.friendRatio}%)`],
+            ['1x YOU SENT REELS', `${(f.youCount || 0).toLocaleString()} (${f.youRatio}%)`],
+            ['1x SAVAGE STREAK', `${f.streak || 1} DAYS`],
+            ['1x 3AM NIGHT SCORE', `${f.nightScore || 0}%`],
+            ['1x NICHE DNA', topHashtag],
+            ['1x REFLEX SPEED', f.responseReflex || '⚡ Instant'],
+            ['1x TOP REACTIONS', topEmojis]
+          ];
+
+          ctx.font = '700 36px "JetBrains Mono", monospace';
+          items.forEach(([label, val], idx) => {
+            const y = 490 + idx * 115;
+            ctx.fillStyle = '#1E293B';
+            ctx.textAlign = 'left';
+            ctx.fillText(label, 150, y);
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#0F172A';
+            ctx.fillText(String(val), 930, y);
+          });
+
+          drawDashedLine(1320);
+
+          ctx.font = '900 48px "JetBrains Mono", monospace';
+          ctx.fillStyle = '#0F172A';
+          ctx.textAlign = 'left';
+          ctx.fillText('TOTAL EXCHANGED', 150, 1415);
+          ctx.textAlign = 'right';
+          ctx.fillText(`${(f.totalReels || 0).toLocaleString()} REELS`, 930, 1415);
+
+          drawDashedLine(1475);
+
+          ctx.textAlign = 'center';
+          ctx.font = '900 54px "JetBrains Mono", monospace';
+          ctx.fillText('||| |||| || ||| |||| ||| |||| |||', 540, 1610);
+          ctx.font = '600 28px "JetBrains Mono", monospace';
+          ctx.fillStyle = '#64748B';
+          ctx.fillText('reelwrapped.app • Verified Local Vault', 540, 1710);
+
+          return canvas.toBlob((blob) => resolve(blob), 'image/png', 1.0);
+        }
+
+        if (currentStoryTheme === 'facts') {
+          // BRAINROT NUTRITION FACTS THEME
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, 1080, 1920);
+          ctx.strokeStyle = '#0F172A';
+          ctx.lineWidth = 14;
+          ctx.strokeRect(70, 90, 940, 1740);
+
+          ctx.fillStyle = '#0F172A';
+          ctx.textAlign = 'left';
+          ctx.font = '900 86px "Plus Jakarta Sans", sans-serif';
+          ctx.fillText('Brainrot Facts', 120, 215);
+
+          ctx.font = '700 34px "Plus Jakarta Sans", sans-serif';
+          ctx.fillText(`Serving Partner: ${f.name} (${f.handle})`, 120, 275);
+
+          ctx.fillRect(120, 310, 840, 24);
+
+          ctx.font = '900 44px "Plus Jakarta Sans", sans-serif';
+          ctx.fillText('Total Reels Exchanged', 120, 410);
+          ctx.textAlign = 'right';
+          ctx.font = '900 76px "JetBrains Mono", monospace';
+          ctx.fillText((f.totalReels || 0).toLocaleString(), 960, 420);
+
+          ctx.fillRect(120, 455, 840, 12);
+
+          const rows = [
+            ['Them Sent Ratio', `${f.friendRatio}% (${(f.friendCount || 0).toLocaleString()})`],
+            ['You Sent Ratio', `${f.youRatio}% (${(f.youCount || 0).toLocaleString()})`],
+            ['Daily Savage Streak', `🔥 ${f.streak || 1} Days`],
+            ['3 AM Night Owl Quotient', `🌙 ${f.nightScore || 0}%`],
+            ['Response Reflex Speed', f.responseReflex || '⚡ Instant'],
+            ['Primary Niche DNA', topHashtag],
+            ['Mutual Emoji Matrix', topEmojis]
+          ];
+
+          rows.forEach(([k, v], idx) => {
+            const y = 560 + idx * 140;
+            ctx.fillStyle = '#0F172A';
+            ctx.textAlign = 'left';
+            ctx.font = '800 38px "Plus Jakarta Sans", sans-serif';
+            ctx.fillText(k, 120, y);
+            ctx.textAlign = 'right';
+            ctx.font = '800 38px "JetBrains Mono", monospace';
+            ctx.fillText(String(v), 960, y);
+            ctx.fillStyle = '#CBD5E1';
+            ctx.fillRect(120, y + 35, 840, 3);
+          });
+
+          ctx.fillStyle = '#0F172A';
+          ctx.textAlign = 'center';
+          ctx.font = '700 28px "JetBrains Mono", monospace';
+          ctx.fillText('* Percent Daily Values are based on a 2,000-reel brainrot diet.', 540, 1660);
+          ctx.fillText('reelwrapped.app • 100% Local Vault', 540, 1740);
+
+          return canvas.toBlob((blob) => resolve(blob), 'image/png', 1.0);
+        }
+
+        // Theme Gradient (sunset, midnight, cyber, gold)
         const grad = ctx.createLinearGradient(0, 0, 1080, 1920);
         if (currentStoryTheme === 'midnight') {
           grad.addColorStop(0, '#09090B'); grad.addColorStop(1, '#27272A');
@@ -2280,7 +2547,7 @@
         ctx.fillStyle = '#FFFFFF';
         ctx.textAlign = 'center';
         ctx.font = '900 44px "Plus Jakarta Sans", sans-serif';
-        ctx.fillText("REEL WRAPPED '26 • 100% LOCAL", 540, 220);
+        ctx.fillText("REEL WRAPPED '25 • 100% LOCAL", 540, 220);
 
         ctx.fillStyle = '#FDE047';
         ctx.font = '800 34px "JetBrains Mono", monospace';
@@ -2309,7 +2576,6 @@
         ctx.fillText(`REELS EXCHANGED (THEM ${f.friendRatio}% • YOU ${f.youRatio}%)`, 540, 865);
 
         // Metrics Pills
-        const topHashtag = (f.hashtags && f.hashtags[0]) ? f.hashtags[0].tag : '#reels';
         const metrics = [
           `🔥 Savage Streak: ${f.streak || 1} Consecutive Days`,
           `🌙 3 AM Night Owl Quotient: ${f.nightScore || 0}%`,
@@ -2345,13 +2611,13 @@
       const blob = await renderHighResStoryCanvasBlob();
       if (!blob) return;
       const f = FRIENDS.find(x => x.id === currentFriendId) || FRIENDS[0];
-      const file = new File([blob], `ReelWrapped_${f.id}_2026.png`, { type: 'image/png' });
+      const file = new File([blob], `ReelWrapped_${f.id}_2025.png`, { type: 'image/png' });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
           await navigator.share({
             files: [file],
-            title: 'Reel Wrapped 2026',
+            title: 'Reel Wrapped 2025',
             text: `${f.name} & I exchanged ${(f.totalReels || 0).toLocaleString()} reels! 🔥`
           });
           showToast('🚀 Shared to Instagram Stories!');
@@ -2489,7 +2755,7 @@
 
       if (currentStorySlide === 0) {
         bodyEl.innerHTML = `
-          <span class="px-3 py-1 rounded-full bg-white/10 text-amber-300 text-[10px] font-black uppercase tracking-widest mb-4">YOUR 2026 DM TELEMETRY</span>
+          <span class="px-3 py-1 rounded-full bg-white/10 text-amber-300 text-[10px] font-black uppercase tracking-widest mb-4">YOUR 2025 DM TELEMETRY</span>
           <h2 class="text-4xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-amber-300">${totalReels.toLocaleString()}</h2>
           <p class="text-sm font-black uppercase tracking-wider mt-1">Reels Exchanged</p>
           <p class="text-xs text-slate-300 mt-4 leading-relaxed">That equals roughly <strong class="text-white font-mono">${totalHours} hours</strong> of pure, unfiltered brainrot across your top ${FRIENDS.length} chats.</p>
@@ -2574,7 +2840,7 @@
       const myName = decodeIgMojibake(participants[1]?.name || 'You');
 
       let friendCount = 0, youCount = 0;
-      const hourly = new Array(12).fill(0);
+      const hourly = new Array(24).fill(0);
       const daySet = new Set();
       const emojiMap = {};
       const creatorMap = {};
@@ -2599,7 +2865,7 @@
         const isReel = link.includes('/reel/') || link.includes('/reels/') || link.includes('instagram.com/p/') || !!m.videos;
         if (isReel) {
           if (isMe) youCount++; else friendCount++;
-          hourly[Math.floor(dt.getHours() / 2)]++;
+          hourly[dt.getHours()]++;
           daySet.add(Math.floor(ts / 86400000));
 
           const owner = m.share?.original_content_owner || 'viral.creator';
@@ -2609,7 +2875,7 @@
           const tags = text.match(/#[a-zA-Z0-9_]+/g) || [];
           tags.forEach(t => { hashtagMap[t.toLowerCase()] = (hashtagMap[t.toLowerCase()] || 0) + 1; });
 
-          if (ghostMessages.length < 10) {
+          if (ghostMessages.length < 15) {
             ghostMessages.push({
               time: dt.toTimeString().slice(0, 5),
               sender: isMe ? 'You' : friendName,
@@ -2629,8 +2895,8 @@
       const streak = wasmComputeStreak(sortedDays);
       const friendRatio = wasmComputeRatio(friendCount, totalReels);
       const youRatio = 100 - friendRatio;
-      const nightReels = hourly[0] + hourly[1] + hourly[11];
-      const nightScore = Math.min(99, Math.max(20, wasmComputeRatio(nightReels * 2, totalReels)));
+      const nightReels = hourly[0] + hourly[1] + hourly[2] + hourly[3] + hourly[4] + hourly[23];
+      const nightScore = Math.min(99, Math.max(0, wasmComputeRatio(nightReels, totalReels)));
 
       const slug = friendName.toLowerCase().replace(/[^a-z0-9]/g, '') || `friend_${rankIndex}`;
       return [{
@@ -2782,13 +3048,34 @@
       showToast(input.type === "password" ? "Password concealed" : "Password revealed");
     }
 
-    function toggleBiometrics() {
+    async function toggleBiometrics() {
       isBiometricActive = !isBiometricActive;
+      localStorage.setItem('rw_biometric_lock', String(isBiometricActive));
       const switchEl = document.getElementById('biometric-switch');
       const knobEl = document.getElementById('biometric-knob');
       const statusText = document.getElementById('biometric-status-text');
 
       if (isBiometricActive) {
+        if (window.PublicKeyCredential && navigator.credentials && navigator.credentials.create) {
+          try {
+            const challenge = new Uint8Array(32);
+            crypto.getRandomValues(challenge);
+            await navigator.credentials.create({
+              publicKey: {
+                challenge,
+                rp: { name: "Reel Wrapped Local Vault" },
+                user: {
+                  id: new Uint8Array(16),
+                  name: "local_vault_user",
+                  displayName: "Reel Wrapped User"
+                },
+                pubKeyCredParams: [{ alg: -7, type: "public-key" }],
+                authenticatorSelection: { userVerification: "preferred" },
+                timeout: 15000
+              }
+            });
+          } catch (_) {}
+        }
         switchEl.className = "w-11 h-6 bg-emerald-500 rounded-full relative p-0.5 transition-colors duration-200";
         knobEl.className = "w-5 h-5 bg-white rounded-full ml-auto shadow-sm transition-all duration-200";
         statusText.innerText = "Active: Fingerprint / Face ID Required";
@@ -2830,6 +3117,9 @@
     }
 
     function toggleModal(modalId) {
+      if (modalId === 'modal-notifications') {
+        renderNotificationsModal();
+      }
       const m = document.getElementById(modalId);
       if (m) m.classList.toggle('hidden');
     }
@@ -2892,12 +3182,15 @@
     window.openStoryMode = openStoryMode;
     window.closeStoryMode = closeStoryMode;
     window.openFriendDossier = openFriendDossier;
+    window.handleLocalFilesSelected = handleLocalFilesSelected;
 
     // Boot Sequence
     window.addEventListener('DOMContentLoaded', async () => {
       await initRustWasmEngine();
 
-      const activeUser = (typeof getActiveAccountUsername === 'function') ? getActiveAccountUsername() : (localStorage.getItem('rw_active_account') || '');
+      const activeUser = (typeof getActiveAccountUsername === 'function')
+        ? getActiveAccountUsername()
+        : (localStorage.getItem('ReelWrapped_ActiveUsername_v2') || localStorage.getItem('rw_active_account') || '');
 
       if (activeUser && activeUser !== 'demo_syndicate') {
         try {

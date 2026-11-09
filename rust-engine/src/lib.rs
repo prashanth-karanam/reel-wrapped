@@ -1,6 +1,39 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 
+// ============================================================================
+// WEBASSEMBLY C-ABI EXPORTS (Matches reel_engine.wasm linear memory contract)
+// ============================================================================
+#[no_mangle]
+pub extern "C" fn compute_ratio(part: i32, total: i32) -> i32 {
+    if total <= 0 {
+        return 50;
+    }
+    ((part * 100) + (total / 2)) / total
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn compute_streak(ptr: *const i32, len: i32) -> i32 {
+    if len <= 0 || ptr.is_null() {
+        return 0;
+    }
+    let slice = std::slice::from_raw_parts(ptr, len as usize);
+    let mut max_streak = 1i32;
+    let mut current_streak = 1i32;
+    for i in 1..(len as usize) {
+        let diff = slice[i] - slice[i - 1];
+        if diff == 1 {
+            current_streak += 1;
+            if current_streak > max_streak {
+                max_streak = current_streak;
+            }
+        } else if diff > 1 {
+            current_streak = 1;
+        }
+    }
+    max_streak
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmojiStat {
     pub emoji: String,
@@ -219,7 +252,6 @@ pub fn analyze_raw_thread_json(raw_json: &str, rank: usize) -> Option<FriendDoss
         }
         prev_ts = Some((ts_secs, is_me));
 
-        // Reactions
         if let Some(reactions) = msg.get("reactions").and_then(|r| r.as_array()) {
             for r in reactions {
                 if let Some(em) = r.get("reaction").and_then(|e| e.as_str()) {
@@ -229,7 +261,6 @@ pub fn analyze_raw_thread_json(raw_json: &str, rank: usize) -> Option<FriendDoss
             }
         }
 
-        // Check if reel share
         let share = msg.get("share");
         let link = share
             .and_then(|s| s.get("link"))
@@ -254,7 +285,7 @@ pub fn analyze_raw_thread_json(raw_json: &str, rank: usize) -> Option<FriendDoss
             let owner = share
                 .and_then(|s| s.get("original_content_owner"))
                 .and_then(|o| o.as_str())
-                .unwrap_or("viral.creator");
+                .unwrap_or("instagram.creator");
             *creator_counts.entry(owner.to_string()).or_insert(0) += 1;
 
             if let Some(share_text) = share.and_then(|s| s.get("share_text")).and_then(|t| t.as_str()) {
@@ -266,7 +297,7 @@ pub fn analyze_raw_thread_json(raw_json: &str, rank: usize) -> Option<FriendDoss
                 }
             }
 
-            if ghost_messages.len() < 12 {
+            if ghost_messages.len() < 16 {
                 let hh = (ts_secs / 3600) % 24;
                 let mm = (ts_secs / 60) % 60;
                 ghost_messages.push(GhostMessageItem {
@@ -274,7 +305,7 @@ pub fn analyze_raw_thread_json(raw_json: &str, rank: usize) -> Option<FriendDoss
                     sender: if is_me { "You".to_string() } else { friend_name.clone() },
                     is_me,
                     is_reel: true,
-                    text_or_url: if link.is_empty() { "https://instagram.com/reels/".to_string() } else { link.to_string() },
+                    text_or_url: if link.is_empty() { "https://www.instagram.com/reels/".to_string() } else { link.to_string() },
                     creator: format!("@{}", owner),
                 });
             }
@@ -290,14 +321,17 @@ pub fn analyze_raw_thread_json(raw_json: &str, rank: usize) -> Option<FriendDoss
     let you_ratio = 100u32.saturating_sub(friend_ratio);
     let streak = compute_longest_streak(&epoch_days);
     let night_reels: u32 = hourly.iter().take(5).sum::<u32>() + hourly.get(23).copied().unwrap_or(0);
-    let night_score = (((night_reels as f64 / total_reels as f64) * 180.0).round() as u32).clamp(18, 99);
+    let night_score = (((night_reels as f64 / total_reels as f64) * 180.0).round() as u32).clamp(0, 99);
 
     reflex_deltas.sort_unstable();
-    let median_reflex = reflex_deltas.get(reflex_deltas.len() / 2).copied().unwrap_or(48);
-    let response_reflex = if median_reflex < 60 {
-        format!("⚡ {}s Avg Reaction", median_reflex)
+    let response_reflex = if let Some(&median_reflex) = reflex_deltas.get(reflex_deltas.len() / 2) {
+        if median_reflex < 60 {
+            format!("⚡ {}s Avg Reaction", median_reflex)
+        } else {
+            format!("☕ {}m Avg Reaction", (median_reflex / 60).max(1))
+        }
     } else {
-        format!("☕ {}m Avg Reaction", (median_reflex / 60).max(1))
+        "Seen in Archive".to_string()
     };
 
     let (status_tag, primary_role, status_subtitle) =
@@ -308,15 +342,7 @@ pub fn analyze_raw_thread_json(raw_json: &str, rank: usize) -> Option<FriendDoss
         .map(|(emoji, count)| EmojiStat { emoji, count })
         .collect();
     top_emojis.sort_by(|a, b| b.count.cmp(&a.count));
-    if top_emojis.is_empty() {
-        top_emojis = vec![
-            EmojiStat { emoji: "💀".to_string(), count: total_reels / 4 + 12 },
-            EmojiStat { emoji: "😭".to_string(), count: total_reels / 6 + 8 },
-            EmojiStat { emoji: "🔥".to_string(), count: total_reels / 8 + 5 },
-        ];
-    } else {
-        top_emojis.truncate(3);
-    }
+    top_emojis.truncate(4);
 
     let mut top_creators: Vec<CreatorStat> = creator_counts
         .into_iter()
@@ -338,19 +364,11 @@ pub fn analyze_raw_thread_json(raw_json: &str, rank: usize) -> Option<FriendDoss
         .map(|(tag, count)| HashtagStat {
             tag,
             count,
-            pct: format!("{}%", ((count * 100) / total_reels.max(1)).clamp(15, 96)),
+            pct: format!("{}%", ((count * 100) / total_reels.max(1)).clamp(1, 100)),
         })
         .collect();
     top_hashtags.sort_by(|a, b| b.count.cmp(&a.count));
-    if top_hashtags.is_empty() {
-        top_hashtags = vec![
-            HashtagStat { tag: "#reels".to_string(), count: total_reels / 3, pct: "88%".to_string() },
-            HashtagStat { tag: "#brainrot".to_string(), count: total_reels / 5, pct: "74%".to_string() },
-            HashtagStat { tag: "#fyp".to_string(), count: total_reels / 6, pct: "62%".to_string() },
-        ];
-    } else {
-        top_hashtags.truncate(5);
-    }
+    top_hashtags.truncate(5);
 
     let handle_slug: String = friend_name
         .to_lowercase()
@@ -361,9 +379,9 @@ pub fn analyze_raw_thread_json(raw_json: &str, rank: usize) -> Option<FriendDoss
     Some(FriendDossier {
         id: if handle_slug.is_empty() { format!("friend_{}", rank) } else { handle_slug.clone() },
         rank,
-        name: friend_name,
+        name: friend_name.clone(),
         handle: format!("@{}", handle_slug),
-        avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80".to_string(),
+        avatar: String::new(),
         total_reels,
         streak,
         friend_ratio,
@@ -380,16 +398,19 @@ pub fn analyze_raw_thread_json(raw_json: &str, rank: usize) -> Option<FriendDoss
             "Prime-Time Reel Syndicate".to_string()
         },
         night_desc: format!("{}% night owl index based on real message timestamps.", night_score),
-        top_genre: top_hashtags.first().map(|h| h.tag.clone()).unwrap_or_else(|| "Viral Reels".to_string()),
+        top_genre: top_hashtags.first().map(|h| h.tag.clone()).unwrap_or_else(|| "Shared Direct Reels".to_string()),
         response_reflex,
         hourly_histogram: hourly,
-        seen_status: "Seen (14m ago)".to_string(),
+        seen_status: "Archived JSON".to_string(),
         unseen_count: 0,
         reactions: top_emojis,
         hashtags: top_hashtags,
         audio_tracks: vec![
-            AudioStat { title: "Original Audio (Viral Reel)".to_string(), artist: "Instagram Reels".to_string(), count: (total_reels / 12).max(3) },
-            AudioStat { title: "Trending Phonk / Edit".to_string(), artist: "Reel Soundtracks".to_string(), count: (total_reels / 18).max(2) },
+            AudioStat {
+                title: format!("Shared Reels Audio ({})", friend_name),
+                artist: format!("{} from them • {} from you", friend_count, you_count),
+                count: total_reels,
+            },
         ],
         creators: top_creators,
         ghost_messages,
