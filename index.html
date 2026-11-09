@@ -622,7 +622,7 @@
         <!-- Story Bottom Watermark -->
         <div class="relative z-10 pt-2 border-t border-white/20 flex items-center justify-between text-[9px] font-mono opacity-85">
           <span>🔒 Verified Local Vault</span>
-          <span>prashanth-karanam.github.io/reel-wrapped</span>
+          <span>reelwrapped.app • Local Vault</span>
         </div>
       </div>
 
@@ -704,7 +704,7 @@
           <div># Option 1: Native Rust Engine (Rayon Multi-Core + Instant UI)</div>
           <div class="text-emerald-400">cargo run --manifest-path rust-engine/Cargo.toml --release</div>
           <div class="mt-1.5"># Option 2: Python instagrapi Ghost Toolkit</div>
-          <div class="text-pink-400">irm https://raw.githubusercontent.com/prashanth-karanam/instagram-reel-counter/main/install.ps1 | iex</div>
+          <div class="text-pink-400">python app.py</div>
         </div>
         <button onclick="connectLocalLoopbackBridge()" class="w-full py-2.5 rounded-xl brand-gradient-bg text-white font-black text-xs shadow-sm active:scale-95 transition-all">
           🔌 SYNC WITH LOCAL 127.0.0.1:8765 BRIDGE
@@ -912,11 +912,11 @@
       <div class="flex items-center justify-between pb-2 border-b border-slate-100">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 rounded-full brand-gradient-bg p-0.5 flex items-center justify-center">
-            <div class="w-full h-full rounded-full bg-slate-900 flex items-center justify-center text-white text-xs font-bold">PK</div>
+            <div id="profile-initials-display" class="w-full h-full rounded-full bg-slate-900 flex items-center justify-center text-white text-xs font-bold">RW</div>
           </div>
           <div>
-            <h4 class="font-black text-sm text-slate-900">@prashanth.k</h4>
-            <span class="text-[10px] text-emerald-600 font-bold">VIP Reel Demigod</span>
+            <h4 id="profile-handle-display" class="font-black text-sm text-slate-900">@yourusername</h4>
+            <span class="text-[10px] text-emerald-600 font-bold">Verified Account</span>
           </div>
         </div>
         <button onclick="toggleModal('modal-profile')" class="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 text-slate-600 hover:text-slate-900">✕ Close</button>
@@ -1981,7 +1981,7 @@
 
         ctx.fillStyle = 'rgba(255,255,255,0.75)';
         ctx.font = '600 28px "JetBrains Mono", monospace';
-        ctx.fillText('prashanth-karanam.github.io/reel-wrapped', 540, 1730);
+        ctx.fillText('reelwrapped.app • Local DM Telemetry', 540, 1730);
 
         canvas.toBlob((blob) => resolve(blob), 'image/png', 1.0);
       });

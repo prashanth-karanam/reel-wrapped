@@ -33,11 +33,13 @@ CACHE_DIR = TOOLKIT_DIR / "cache"
 VAULT_JSON_FILE = TOOLKIT_DIR / "reel_wrapped_local_vault.json"
 SESSIONS_DIR = TOOLKIT_DIR / "sessions"
 VAULTS_DIR = TOOLKIT_DIR / "vaults"
+CHECKPOINTS_DIR = TOOLKIT_DIR / "checkpoints"
 
 TOOLKIT_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 VAULTS_DIR.mkdir(parents=True, exist_ok=True)
+CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 
 try:
     from instagrapi import Client
@@ -434,15 +436,28 @@ def enrich_friend_dossier(state, total, friend_idx):
     return detected_niche, top_creators, top_audio
 
 
-def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6, batch_size: int = 40, workers: int = 5):
+def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 50, batch_size: int = 40, workers: int = 4):
     """
-    Pings all conversations in parallel progressive swarm waves.
-    Uses bounded concurrent worker threads with safe jitter and adaptive backoff
-    to achieve the fastest possible scan speed while strictly avoiding rate limits.
+    Pings all conversations in parallel progressive swarm waves until inbox ends.
+    Uses bounded concurrent worker threads with safe jitter and adaptive backoff.
+    Resumes from saved cursor checkpoints so reel counts continuously accumulate
+    backwards through chat history rather than resetting or getting stuck.
     Emits continuous single-line JSON progress events to stdout.
     """
     my_pk = str(cl.user_id)
     now = datetime.datetime.now()
+
+    active_user = getattr(cl, "username", "") or (USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else f"user_{cl.user_id}")
+    safe_uname = "".join(c for c in active_user if c.isalnum() or c in ("_", ".")).lower() if active_user else "default_user"
+    checkpoint_file = CHECKPOINTS_DIR / f"{safe_uname}.json"
+
+    saved_threads = {}
+    if checkpoint_file.exists():
+        try:
+            cp_data = json.loads(checkpoint_file.read_text(encoding="utf-8"))
+            saved_threads = cp_data.get("threads", {})
+        except Exception:
+            saved_threads = {}
 
     try:
         inbox = cl.private_request(f"direct_v2/inbox/?limit={max_threads}")
@@ -483,6 +498,9 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6,
                 diff_m = max(1, int((now - seen_ts).total_seconds() / 60))
                 seen_status = f"Seen ({diff_m}m ago)"
 
+        prior = saved_threads.get(t_id, {})
+        prior_seen_ids = set(prior.get("seen_ids", []))
+
         thread_states[t_id] = {
             "id": f"friend_{idx}",
             "t_id": t_id,
@@ -491,20 +509,21 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6,
             "avatar": avatar,
             "seen_status": seen_status,
             "unseen_count": unseen_count,
-            "sent": 0,
-            "rcvd": 0,
-            "hourly": [0] * 24,
-            "daily_dates": set(),
-            "emoji_counter": Counter(),
-            "creator_counter": Counter(),
-            "creator_avatars": {},
-            "audio_counter": Counter(),
-            "hashtag_counter": Counter(),
-            "ghost_messages": [],
-            "reflex_deltas": [],
-            "cursor": None,
-            "exhausted": False,
-            "total_msgs_scanned": 0,
+            "sent": prior.get("sent", 0),
+            "rcvd": prior.get("rcvd", 0),
+            "hourly": prior.get("hourly", [0] * 24),
+            "daily_dates": set(prior.get("daily_dates", [])),
+            "emoji_counter": Counter(prior.get("emoji_counter", {})),
+            "creator_counter": Counter(prior.get("creator_counter", {})),
+            "creator_avatars": prior.get("creator_avatars", {}),
+            "audio_counter": Counter({(a[0], a[1]): c for a, c in prior.get("audio_counter_list", [])}),
+            "hashtag_counter": Counter(prior.get("hashtag_counter", {})),
+            "ghost_messages": prior.get("ghost_messages", []),
+            "reflex_deltas": prior.get("reflex_deltas", []),
+            "cursor": prior.get("cursor", None),
+            "exhausted": prior.get("exhausted", False),
+            "total_msgs_scanned": prior.get("total_msgs_scanned", 0),
+            "seen_ids": prior_seen_ids,
         }
 
     def fetch_thread_slice(t_id, state_cursor):
@@ -514,24 +533,25 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6,
 
         for attempt in range(3):
             try:
-                # Safe micro-jitter (20-60ms) to spread HTTP connections evenly
-                time.sleep(random.uniform(0.02, 0.06))
+                # Safe micro-jitter (40-100ms) to spread HTTP connections evenly
+                time.sleep(random.uniform(0.04, 0.10))
                 res = cl.private_request(f"direct_v2/threads/{t_id}/", params=params)
                 th = res.get("thread", {})
                 items = th.get("items", [])
                 oldest = th.get("oldest_cursor")
-                return t_id, items, oldest, None
+                has_older = th.get("has_older", False)
+                return t_id, items, oldest, has_older, None
             except FeedbackRequired:
-                time.sleep(1.2 * (attempt + 1))
+                time.sleep(2.0 * (attempt + 1))
             except ClientConnectionError:
-                time.sleep(0.4)
+                time.sleep(0.5)
             except Exception as e:
                 if attempt == 2:
-                    return t_id, [], None, e
+                    return t_id, [], None, False, e
                 time.sleep(0.3)
-        return t_id, [], None, None
+        return t_id, [], None, False, None
 
-    total_scanned_overall = 0
+    total_scanned_overall = sum(s["total_msgs_scanned"] for s in thread_states.values())
 
     for b in range(1, batches + 1):
         active_entries = [(t_id, state["cursor"]) for t_id, state in thread_states.items() if not state["exhausted"]]
@@ -550,16 +570,23 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6,
                 t_id = future_to_tid[future]
                 state = thread_states[t_id]
                 try:
-                    res_tid, items, oldest, err = future.result()
+                    res_tid, items, oldest, has_older, err = future.result()
                     if err or not items:
                         state["exhausted"] = True
                         continue
 
-                    state["total_msgs_scanned"] += len(items)
-                    total_scanned_overall += len(items)
                     prev_msg_meta = None
 
                     for item in items:
+                        item_id = str(item.get("item_id") or item.get("id") or "")
+                        if item_id:
+                            if item_id in state["seen_ids"]:
+                                continue
+                            state["seen_ids"].add(item_id)
+
+                        state["total_msgs_scanned"] += 1
+                        total_scanned_overall += 1
+
                         is_me = str(item.get("user_id", "")) == my_pk
                         dt = parse_timestamp(item.get("timestamp", 0))
                         ts_sec = dt.timestamp()
@@ -599,7 +626,7 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6,
                                 for tag in tags:
                                     state["hashtag_counter"][f"#{tag.lower()}"] += 1
 
-                            if len(state["ghost_messages"]) < 10:
+                            if len(state["ghost_messages"]) < 12:
                                 state["ghost_messages"].append({
                                     "time": dt.strftime("%H:%M"),
                                     "sender": "You" if is_me else state["name"][:16],
@@ -610,7 +637,7 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6,
                                     "caption": meta["caption"][:60] if meta["caption"] else "",
                                 })
 
-                    if oldest and oldest != state["cursor"]:
+                    if oldest and oldest != state["cursor"] and has_older:
                         state["cursor"] = oldest
                     else:
                         state["exhausted"] = True
@@ -713,6 +740,37 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6,
             except Exception:
                 pass
 
+        # Save cumulative checkpoint to disk after every wave
+        cp_payload = {
+            "user": safe_uname,
+            "updatedAt": datetime.datetime.now().isoformat(),
+            "totalScanned": total_scanned_overall,
+            "threads": {}
+        }
+        for st_id, st in thread_states.items():
+            seen_list = list(st["seen_ids"])[-3000:]
+            cp_payload["threads"][st_id] = {
+                "sent": st["sent"],
+                "rcvd": st["rcvd"],
+                "hourly": st["hourly"],
+                "daily_dates": list(st["daily_dates"]),
+                "emoji_counter": dict(st["emoji_counter"]),
+                "creator_counter": dict(st["creator_counter"]),
+                "creator_avatars": st["creator_avatars"],
+                "audio_counter_list": [[k[0], k[1], v] for k, v in st["audio_counter"].items()],
+                "hashtag_counter": dict(st["hashtag_counter"]),
+                "ghost_messages": st["ghost_messages"][:12],
+                "reflex_deltas": st["reflex_deltas"][-60:],
+                "cursor": st["cursor"],
+                "exhausted": st["exhausted"],
+                "total_msgs_scanned": st["total_msgs_scanned"],
+                "seen_ids": seen_list,
+            }
+        try:
+            checkpoint_file.write_text(json.dumps(cp_payload, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+
         total_reels_now = sum(d["totalReels"] for d in dossiers)
         # Emit real-time progress update
         progress_payload = {
@@ -727,9 +785,6 @@ def stream_progressive_scan(cl: Client, max_threads: int = 15, batches: int = 6,
         }
         print(json.dumps(progress_payload, ensure_ascii=False))
         sys.stdout.flush()
-
-        if not active_any:
-            break
 
     # Emit final complete event
     active_user = getattr(cl, "username", "") or (USER_FILE.read_text(encoding="utf-8").strip() if USER_FILE.exists() else f"user_{cl.user_id}")
@@ -752,10 +807,10 @@ def main():
     parser.add_argument("--password", default="")
     parser.add_argument("--code", default="")
     parser.add_argument("--limit", type=int, default=15)
-    parser.add_argument("--batches", type=int, default=6)
+    parser.add_argument("--batches", type=int, default=50)
     parser.add_argument("--pages", type=int, default=0, help="Alias for batches")
     parser.add_argument("--batch-size", type=int, default=40)
-    parser.add_argument("--workers", type=int, default=5, help="Concurrent swarm workers")
+    parser.add_argument("--workers", type=int, default=4, help="Concurrent swarm workers")
     parser.add_argument("--fast", action="store_true", help="Fast credential check without inline scan")
     args = parser.parse_args()
 

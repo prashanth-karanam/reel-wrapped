@@ -561,7 +561,7 @@ function broadcastScanState(event: string, data: any) {
 
 let activeScanChild: any = null;
 
-function triggerBackgroundDeepScan(limit = 15, batches = 10, batchSize = 40, workers = 5): boolean {
+function triggerBackgroundDeepScan(limit = 15, batches = 50, batchSize = 40, workers = 4): boolean {
   if (currentScanState.isScanning && activeScanChild) {
     return false; // Already in progress
   }
@@ -723,9 +723,9 @@ app.get('/api/ig/live-scan-status', (_req, res) => {
 
 app.post('/api/ig/start-deep-scan', (req, res) => {
   const limit = Math.min(30, Math.max(5, Number(req.body?.limit) || 15));
-  const batches = Math.min(20, Math.max(2, Number(req.body?.batches) || 10));
+  const batches = Math.min(200, Math.max(2, Number(req.body?.batches) || 50));
   const batchSize = Math.min(100, Math.max(10, Number(req.body?.batchSize) || 40));
-  const workers = Math.min(8, Math.max(2, Number(req.body?.workers) || 5));
+  const workers = Math.min(6, Math.max(2, Number(req.body?.workers) || 4));
 
   const started = triggerBackgroundDeepScan(limit, batches, batchSize, workers);
   res.json({
@@ -1254,12 +1254,6 @@ app.get('/api/friends', (req, res) => {
   if (currentScanState.friends && currentScanState.friends.length > 0) {
     return res.json(currentScanState.friends);
   }
-  try {
-    const vaultPath = path.join(os.homedir(), '.ig_toolkit', 'reel_wrapped_local_vault.json');
-    if (fs.existsSync(vaultPath)) {
-      return res.json(JSON.parse(fs.readFileSync(vaultPath, 'utf8')));
-    }
-  } catch {}
   res.json([]);
 });
 

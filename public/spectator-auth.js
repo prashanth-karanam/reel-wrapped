@@ -1020,10 +1020,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   // 4. Inject Start-of-App Multi-User Login Gate, 9:16 Spectator Modal & 2FA Modal
-  const winCmd = `irm https://raw.githubusercontent.com/prashanth-karanam/reel-wrapped/main/install.ps1 | iex`;
-  const macCmd = `curl -fsSL https://raw.githubusercontent.com/prashanth-karanam/reel-wrapped/main/install.sh | bash`;
-  const elecCmd = `git clone https://github.com/prashanth-karanam/reel-wrapped && cd reel-wrapped && npm i && npm run electron`;
-  const gitPushCmd = `mkdir -p reel-wrapped-clean && tar -xzf reel-wrapped-v2.4-clean.tar.gz -C reel-wrapped-clean && cd reel-wrapped-clean && git init -b main && git add -A && git commit -m "feat: Reel Wrapped v2.4 (Multi-User Login, In-App 9:16 Spectator, Rust/WASM, Localhost/Electron & APK)" && git remote add origin https://github.com/prashanth-karanam/reel-wrapped.git && git push -u origin main --force`;
+  const winCmd = `npm run dev`;
+  const macCmd = `npm run dev`;
+  const elecCmd = `npm run electron`;
+  const gitPushCmd = `git push origin main`;
 
   const modalsHtml = `
     <!-- START-OF-APP MULTI-USER LOGIN & LAUNCHER GATE -->
@@ -1298,10 +1298,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           `;
         }
 
-        const uInput = document.getElementById('start-username-input');
-        if (uInput && !uInput.value) uInput.value = savedData.username;
-        const vuInput = document.getElementById('vault-username-input');
-        if (vuInput && !vuInput.value) vuInput.value = savedData.username;
+        // Do not auto-fill username inputs so anyone can type their own username
       }
     }
   } catch (_) {}
@@ -1425,7 +1422,7 @@ window.triggerDeeperScan = async function(workers = 5) {
     const res = await fetch('/api/ig/start-deep-scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limit: 15, batches: 10, batchSize: 40, workers: workers })
+      body: JSON.stringify({ limit: 15, batches: 50, batchSize: 40, workers: workers })
     });
     const data = await res.json();
     if (data.status === 'started' || data.status === 'already_running') {
