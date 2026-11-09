@@ -94,8 +94,11 @@ window.switchToSavedAccount = async function(username) {
     if (res.ok) {
       const serverData = await res.json();
       if (serverData.status === 'ok') {
-        const friendsList = serverData.friends || [];
-        saveUserAccountVault(clean, serverData.hasSession ? 'Saved Session' : 'Offline Vault', friendsList);
+        let friendsList = serverData.friends || [];
+        if (clean === 'demo_syndicate' && (!friendsList || friendsList.length === 0)) {
+          friendsList = window.DEFAULT_FRIENDS || [];
+        }
+        saveUserAccountVault(clean, serverData.hasSession ? 'Saved Session' : (clean === 'demo_syndicate' ? 'Interactive Demo' : 'Offline Vault'), friendsList);
         setActiveAccountUsername(clean);
         enrichFriendsWithPlayableStreams(friendsList);
         window.FRIENDS = friendsList;
@@ -103,20 +106,24 @@ window.switchToSavedAccount = async function(username) {
         if (friendsList.length > 0) {
           window.currentFriendId = friendsList[0].id;
           if (typeof currentFriendId !== 'undefined') currentFriendId = friendsList[0].id;
+        } else {
+          window.currentFriendId = null;
+          if (typeof currentFriendId !== 'undefined') currentFriendId = null;
         }
         if (typeof window.saveFriendsToIndexedDB === 'function') {
           await window.saveFriendsToIndexedDB(friendsList);
         }
         if (typeof window.updateGlobalBannerSummary === 'function') window.updateGlobalBannerSummary();
         if (typeof window.filterFriendsList === 'function') window.filterFriendsList();
-        if (friendsList.length > 0 && typeof window.selectFriend === 'function') {
+        if (typeof window.selectFriend === 'function') {
           window.selectFriend(window.currentFriendId);
         }
         window.triggerGlobalCountRollup(700);
         closeStartLoginGate();
         renderMultiUserListUI();
+        const totalCount = friendsList.reduce((s, f) => s + (f.totalReels || 0), 0);
         if (typeof showToast === 'function') {
-          showToast(`✅ Switched to @${clean} (${(serverData.totalReels || 0).toLocaleString()} reels, ${friendsList.length} threads)`);
+          showToast(`✅ Switched to @${clean} (${totalCount.toLocaleString()} reels, ${friendsList.length} threads)`);
         }
         return;
       }
@@ -128,12 +135,15 @@ window.switchToSavedAccount = async function(username) {
   // Fallback to local map if server is unreachable
   const map = loadSavedAccountsMap();
   const acct = map[clean];
-  if (!acct || !Array.isArray(acct.friends) || !acct.friends.length) return;
+  const fallbackFriends = (acct && Array.isArray(acct.friends) && acct.friends.length)
+    ? acct.friends
+    : (clean === 'demo_syndicate' ? (window.DEFAULT_FRIENDS || []) : []);
+  if (!fallbackFriends || !fallbackFriends.length) return;
 
   setActiveAccountUsername(clean);
-  enrichFriendsWithPlayableStreams(acct.friends);
-  window.FRIENDS = acct.friends;
-  if (typeof FRIENDS !== 'undefined') FRIENDS = acct.friends;
+  enrichFriendsWithPlayableStreams(fallbackFriends);
+  window.FRIENDS = fallbackFriends;
+  if (typeof FRIENDS !== 'undefined') FRIENDS = fallbackFriends;
   window.currentFriendId = window.FRIENDS[0].id;
   if (typeof currentFriendId !== 'undefined') currentFriendId = window.FRIENDS[0].id;
 
@@ -439,7 +449,92 @@ function getPlayableReelItems(friend) {
 window.renderLeaderboard = function(list) {
   const container = document.getElementById('leaderboard-list');
   if (!container) return;
+  const q = (document.getElementById('search-friends-input')?.value || '').trim();
+  const allFriends = (window.FRIENDS && window.FRIENDS.length > 0) ? window.FRIENDS : (typeof FRIENDS !== 'undefined' ? FRIENDS : []);
+
   if (!list || !list.length) {
+    if (q) {
+      container.innerHTML = `
+        <div class="p-8 text-center text-xs text-slate-500 font-bold bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+          <div>No friends match "<span class="text-slate-900">${q}</span>"</div>
+          <button onclick="clearSearch()" class="text-pink-600 underline cursor-pointer">Clear search query</button>
+        </div>
+      `;
+      return;
+    }
+
+    if (!allFriends || allFriends.length === 0) {
+      const activeUser = (typeof getActiveAccountUsername === 'function') ? getActiveAccountUsername() : (localStorage.getItem('rw_active_account') || '');
+      const isScanning = window.currentScanState && window.currentScanState.isScanning;
+
+      if (isScanning) {
+        container.innerHTML = `
+          <div class="p-8 text-center rounded-3xl bg-slate-900 border border-purple-500/30 text-white space-y-3 shadow-xl">
+            <div class="w-12 h-12 mx-auto rounded-2xl bg-purple-500/20 border border-purple-400/30 flex items-center justify-center text-xl animate-pulse">
+              ⚡
+            </div>
+            <h3 class="text-sm font-black text-purple-200 uppercase tracking-wide">Scanning Your Instagram DMs...</h3>
+            <p class="text-xs text-purple-100/80 max-w-xs mx-auto">
+              Swarm workers are pinging your chats at 75 msgs/load. Your top friend rankings and reel volume will populate right here automatically.
+            </p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="p-6 rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-950 to-purple-950 border border-purple-500/40 text-white space-y-5 shadow-2xl relative overflow-hidden">
+          <div class="absolute -right-10 -bottom-10 w-36 h-36 rounded-full bg-pink-500/20 blur-2xl pointer-events-none"></div>
+          
+          <div class="space-y-1.5 text-center">
+            <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black bg-pink-500/20 text-pink-300 border border-pink-400/30 uppercase tracking-wider mb-1">
+              ✨ 2025 INSTAGRAM REEL WRAPPED
+            </div>
+            <h3 class="text-lg font-black tracking-tight">${activeUser ? `@${activeUser}'s DM Stats Are Waiting` : 'Your DM Reel Stats Are Waiting'}</h3>
+            <p class="text-xs text-purple-200/90 max-w-sm mx-auto leading-relaxed">
+              Discover who flooded your inbox with reels, your 3 AM night-owl hours, and calculate who owes whom an unpaid intern wage.
+            </p>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="space-y-2 pt-1 max-w-xs mx-auto">
+            <button onclick="window.openStartLoginGate()" class="w-full py-3 px-4 rounded-2xl brand-gradient-bg text-white font-black text-xs shadow-lg shadow-pink-500/25 hover:opacity-95 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
+              <span>🔐</span>
+              <span>LOGIN &amp; SCAN INSTAGRAM DMs</span>
+            </button>
+            <button onclick="window.continueWithDemoProfile()" class="w-full py-2.5 px-4 rounded-2xl bg-white/10 hover:bg-white/15 text-purple-100 font-bold text-xs border border-white/20 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer">
+              <span>✨</span>
+              <span>Try Interactive Demo Mode</span>
+            </button>
+            <button onclick="switchTab('tab-vault')" class="w-full py-2 px-3 text-[11px] text-purple-300 hover:text-white font-bold transition-all text-center cursor-pointer">
+              📁 Or drop exported message_1.json in Vault →
+            </button>
+          </div>
+
+          <!-- Feature preview grid -->
+          <div class="pt-3 border-t border-white/10 grid grid-cols-2 gap-2 text-left">
+            <div class="p-2.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
+              <div class="text-xs font-black text-pink-300">🥇 Friend Rankings</div>
+              <div class="text-[10px] text-purple-200/80">Sort your mutuals by volume, streaks &amp; ratios.</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
+              <div class="text-xs font-black text-amber-300">🌙 3 AM Night Owls</div>
+              <div class="text-[10px] text-purple-200/80">Track midnight to dawn transmissions.</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
+              <div class="text-xs font-black text-emerald-300">⚖️ Symmetry Ratio</div>
+              <div class="text-[10px] text-purple-200/80">Measure who sends more and balance.</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
+              <div class="text-xs font-black text-indigo-300">🎬 9:16 Story Cards</div>
+              <div class="text-[10px] text-purple-200/80">5-slide shareable deck with studio audio.</div>
+            </div>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     container.innerHTML = `<div class="p-8 text-center text-xs text-slate-400 font-bold bg-slate-50 rounded-2xl border border-slate-200">No friends match this filter.</div>`;
     return;
   }
@@ -507,12 +602,45 @@ if (typeof _origSelectFriend === 'function') {
 }
 
 window.renderGhostRadar = function(selectedFriend) {
-  if (!selectedFriend) return;
-  enrichFriendsWithPlayableStreams(FRIENDS);
-
   const receiptList = document.getElementById('ghost-receipt-list');
+  const feedEl = document.getElementById('ghost-messages-feed');
+
+  if (!window.FRIENDS || window.FRIENDS.length === 0 || !selectedFriend) {
+    if (receiptList) {
+      receiptList.innerHTML = `
+        <div class="p-6 text-center rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+          <div class="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center mx-auto text-lg font-bold">
+            👻
+          </div>
+          <div class="text-xs font-black text-slate-800 uppercase tracking-wide">Ghost Mode Standby</div>
+          <p class="text-[11px] text-slate-500 max-w-xs mx-auto leading-relaxed">
+            No DM threads scanned yet. Connect your account to inspect unseen messages and direct delivery timestamps with zero read receipts sent.
+          </p>
+          <div class="flex items-center justify-center gap-2 pt-1">
+            <button onclick="window.openStartLoginGate()" class="px-3 py-1.5 rounded-xl brand-gradient-bg text-white font-bold text-[11px] shadow-sm cursor-pointer">
+              🔐 Connect Account
+            </button>
+            <button onclick="window.continueWithDemoProfile()" class="px-3 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-[11px] cursor-pointer">
+              ✨ Try Demo
+            </button>
+          </div>
+        </div>
+      `;
+    }
+    if (feedEl) {
+      feedEl.innerHTML = `
+        <div class="p-6 text-center rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-400">
+          No conversation selected. Connect an account or select demo mode above.
+        </div>
+      `;
+    }
+    return;
+  }
+
+  enrichFriendsWithPlayableStreams(window.FRIENDS);
+
   if (receiptList) {
-    receiptList.innerHTML = FRIENDS.map(f => {
+    receiptList.innerHTML = window.FRIENDS.map(f => {
       const isUnseen = (f.seenStatus || '').includes('UNSEEN');
       return `
         <div onclick="selectFriend('${f.id}')" class="p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
@@ -535,7 +663,6 @@ window.renderGhostRadar = function(selectedFriend) {
     }).join('');
   }
 
-  const feedEl = document.getElementById('ghost-messages-feed');
   if (feedEl) {
     const msgs = selectedFriend.ghostMessages || [];
     if (msgs.length === 0) {
@@ -1438,16 +1565,22 @@ window.addEventListener('DOMContentLoaded', async () => {
   // If the user already selected an active account, or if authentic local vault friends are already loaded
   const activeUser = getActiveAccountUsername();
   const savedMap = loadSavedAccountsMap();
-  if (activeUser && savedMap[activeUser] && Array.isArray(savedMap[activeUser].friends)) {
+  if (activeUser && savedMap[activeUser] && Array.isArray(savedMap[activeUser].friends) && savedMap[activeUser].friends.length > 0) {
     window.FRIENDS = savedMap[activeUser].friends;
     window.currentFriendId = window.FRIENDS[0].id;
     closeStartLoginGate();
   } else if (Array.isArray(window.FRIENDS) && window.FRIENDS.length > 0) {
     closeStartLoginGate();
+  } else {
+    window.FRIENDS = [];
+    window.currentFriendId = null;
   }
 
-  const activeFriend = FRIENDS.find(x => x.id === window.currentFriendId) || FRIENDS[0];
-  if (activeFriend) window.renderGhostRadar(activeFriend);
+  const activeFriend = (window.FRIENDS && window.FRIENDS.length > 0)
+    ? (window.FRIENDS.find(x => x.id === window.currentFriendId) || window.FRIENDS[0])
+    : null;
+  if (typeof window.renderGhostRadar === 'function') window.renderGhostRadar(activeFriend);
+  if (typeof window.selectFriend === 'function') window.selectFriend(window.currentFriendId);
   if (typeof window.filterFriendsList === 'function') window.filterFriendsList();
   if (typeof window.updateGlobalBannerSummary === 'function') window.updateGlobalBannerSummary();
   window.triggerGlobalCountRollup(650);
